@@ -1,9 +1,10 @@
 import type { DataSource } from 'typeorm';
-import { seedAirports } from '../../src/database/seed/seeder.js';
-import { connectTestDataSource } from '../helpers/data-source.js';
+import { type SeedOutcome, seedAirports } from '../../src/database/seed/seeder.js';
+import { connectTestDataSource, disposeTestDataSource } from '../helpers/data-source.js';
 
 describe('seedAirports', () => {
   let ds: DataSource;
+  let firstRun: SeedOutcome;
 
   const count = async (where = 'true'): Promise<number> =>
     (await ds.query(`SELECT count(*)::int AS n FROM airports WHERE ${where}`))[0].n;
@@ -11,16 +12,16 @@ describe('seedAirports', () => {
   beforeAll(async () => {
     ds = await connectTestDataSource();
     await ds.runMigrations();
-    await ds.query(`TRUNCATE airports`);
+    // Seed once up front so every test below is independent of run order.
+    firstRun = await seedAirports(ds);
   });
 
   afterAll(async () => {
-    await ds.destroy();
+    await disposeTestDataSource(ds);
   });
 
   it('loads 4,187 airports into PostGIS', async () => {
-    const outcome = await seedAirports(ds);
-    expect(outcome).toEqual({ seeded: true, written: 4187, dropped: 5113 });
+    expect(firstRun).toEqual({ seeded: true, written: 4187, dropped: 5113 });
     expect(await count()).toBe(4187);
   });
 

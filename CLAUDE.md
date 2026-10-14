@@ -59,3 +59,7 @@ pnpm test:e2e
 - Coverage target ~80% is reported, not a CI gate. Don't write brittle tests just to hit it.
 - Tests: unit `src/**/*.spec.ts` (api, shared) / `src/**/*.test.tsx` (web); integration
   `test/integration/**/*.int-spec.ts`; e2e `test/e2e/**/*.e2e-spec.ts`; Playwright `apps/web/e2e/`.
+- **DB tests must be order-independent.** Integration/e2e configs shuffle file and test order on
+  every run and run files in parallel. Each suite gets its own database via
+  `connectTestDataSource()` / `disposeTestDataSource()` (test/helpers/data-source.ts); do setup
+  (migrate, seed) in `beforeAll`, and a test that mutates shared rows must restore them itself.

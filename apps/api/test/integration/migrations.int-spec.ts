@@ -1,23 +1,22 @@
 import type { DataSource } from 'typeorm';
-import { connectTestDataSource } from '../helpers/data-source.js';
+import { connectTestDataSource, disposeTestDataSource } from '../helpers/data-source.js';
 
 describe('migrations', () => {
   let ds: DataSource;
 
   beforeAll(async () => {
     ds = await connectTestDataSource();
+    await ds.runMigrations();
   });
 
   afterAll(async () => {
-    await ds.runMigrations(); // leave the schema applied for any later suites
-    await ds.destroy();
+    await disposeTestDataSource(ds);
   });
 
   const tableExists = async () =>
     (await ds.query(`SELECT to_regclass('public.airports') IS NOT NULL AS exists`))[0].exists;
 
   it('creates the airports table, extensions and indexes', async () => {
-    await ds.runMigrations();
     expect(await tableExists()).toBe(true);
 
     const extensions = await ds.query(`SELECT extname FROM pg_extension`);
@@ -51,7 +50,7 @@ describe('migrations', () => {
          FROM airports WHERE icao_code = 'EGLL'`,
     );
     expect(row).toEqual({ by_code: true, by_city: true });
-    await ds.query(`DELETE FROM airports`);
+    await ds.query(`DELETE FROM airports WHERE icao_code = 'EGLL'`);
   });
 
   it('rejects malformed codes', async () => {
@@ -63,8 +62,11 @@ describe('migrations', () => {
     ).rejects.toThrow(/check constraint/);
   });
 
-  it('reverts cleanly', async () => {
+  it('reverts and re-applies cleanly', async () => {
     await ds.undoLastMigration();
     expect(await tableExists()).toBe(false);
+    // Re-apply so the other tests in this file see the schema whatever order they run in.
+    await ds.runMigrations();
+    expect(await tableExists()).toBe(true);
   });
 });
