@@ -1,0 +1,136 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  HUSKY: 0
+  CI: true
+
+jobs:
+  lint-typecheck:
+    name: Lint, format, typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # corepack must be enabled before setup-node so its `cache: pnpm` step can find pnpm.
+      - run: corepack enable
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm format:check
+      - run: pnpm typecheck
+
+  unit:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: corepack enable
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build:shared
+      - run: pnpm --filter @location-search/shared test:unit
+      # Coverage is reported, not gated.
+      - run: pnpm --filter @location-search/api --filter @location-search/web test:unit --coverage
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: unit-coverage
+          path: |
+            apps/api/coverage
+            apps/web/coverage
+          if-no-files-found: ignore
+
+  integration:
+    name: API integration tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: corepack enable
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build:shared
+      # Testcontainers starts PostGIS itself using the runner's Docker daemon.
+      - run: pnpm --filter @location-search/api test:integration
+
+  e2e:
+    name: API e2e + Playwright
+    runs-on: ubuntu-latest
+    env:
+      E2E_BASE_URL: http://localhost:3100
+    steps:
+      - uses: actions/checkout@v7
+      - run: corepack enable
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build:shared
+      - name: API e2e tests
+        run: pnpm --filter @location-search/api test:e2e
+      - name: Start the e2e stack
+        run: docker compose -f docker-compose.e2e.yml up -d --build --wait --wait-timeout 300
+      - name: Install Playwright Chromium
+        run: pnpm --filter @location-search/web exec playwright install --with-deps chromium
+      - name: Playwright tests
+        run: pnpm --filter @location-search/web test:e2e
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report
+          path: |
+            apps/web/playwright-report
+            apps/web/test-results
+          if-no-files-found: ignore
+      - name: Dump stack logs
+        if: failure()
+        run: docker compose -f docker-compose.e2e.yml logs --no-color
+      - name: Tear down
+        if: always()
+        run: docker compose -f docker-compose.e2e.yml down -v
+
+  docker-build:
+    name: Docker images
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - name: Build db image
+        uses: docker/build-push-action@v7
+        with:
+          context: docker/db
+          push: false
+          cache-from: type=gha,scope=db
+          cache-to: type=gha,scope=db,mode=max
+      - name: Build app image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: docker/api/Dockerfile
+          push: false
+          cache-from: type=gha,scope=app
+          cache-to: type=gha,scope=app,mode=max
