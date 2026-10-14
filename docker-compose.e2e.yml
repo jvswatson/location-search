@@ -1,0 +1,43 @@
+# Throwaway stack for Playwright: fresh database every run, no named volumes.
+#   docker compose -f docker-compose.e2e.yml up -d --build --wait
+#   E2E_BASE_URL=http://localhost:3100 pnpm --filter @location-search/web test:e2e
+#   docker compose -f docker-compose.e2e.yml down -v
+name: location-search-e2e
+
+services:
+  db:
+    build:
+      context: docker/db
+    image: location-search-db:local
+    environment:
+      POSTGRES_USER: airports
+      POSTGRES_PASSWORD: airports
+      POSTGRES_DB: airports
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U airports -d airports']
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  app:
+    build:
+      context: .
+      dockerfile: docker/api/Dockerfile
+    image: location-search-app:local
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+      POSTGRES_USER: airports
+      POSTGRES_PASSWORD: airports
+      POSTGRES_DB: airports
+      # Test traffic is bursty and comes from one IP.
+      RATE_LIMIT_LIMIT: 10000
+      RATE_LIMIT_TTL_MS: 1000
+    depends_on:
+      db:
+        condition: service_healthy
+    init: true
+    ports:
+      - '${E2E_APP_PORT:-3100}:3000'

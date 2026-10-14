@@ -19,5 +19,26 @@ services:
       timeout: 3s
       retries: 30
 
+  app:
+    build:
+      context: .
+      dockerfile: docker/api/Dockerfile
+    image: location-search-app:local
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER:-airports}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-airports}
+      POSTGRES_DB: ${POSTGRES_DB:-airports}
+      RATE_LIMIT_LIMIT: ${RATE_LIMIT_LIMIT:-100}
+      RATE_LIMIT_TTL_MS: ${RATE_LIMIT_TTL_MS:-1000}
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - '${APP_PORT:-3000}:3000'
+    init: true # tini as PID 1 so SIGTERM stops Node promptly
+    restart: unless-stopped
+
 volumes:
   db-data:
