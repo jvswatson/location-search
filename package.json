@@ -17,7 +17,13 @@
     "test:integration": "pnpm -r test:integration",
     "test:e2e": "pnpm -r test:e2e",
     "build:shared": "pnpm --filter @location-search/shared build",
-    "build": "pnpm build:shared && pnpm -r --filter=!@location-search/shared build"
+    "build": "pnpm build:shared && pnpm -r --filter=!@location-search/shared build",
+    "dev": "pnpm build:shared && pnpm --parallel --filter @location-search/api --filter @location-search/web dev",
+    "docker:db": "docker compose up -d --wait db",
+    "docker:up": "docker compose up --build",
+    "docker:down": "docker compose down",
+    "docker:e2e:up": "docker compose -f docker-compose.e2e.yml up -d --build --wait",
+    "docker:e2e:down": "docker compose -f docker-compose.e2e.yml down -v"
   },
   "lint-staged": {
     "*.{ts,tsx,js,mjs,cjs}": [
