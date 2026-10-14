@@ -40,6 +40,12 @@ pnpm dev            # builds shared, then runs api and web in watch mode
 `RATE_LIMIT_LIMIT`, `RATE_LIMIT_TTL_MS`). `DATABASE_URL` is accepted as an alternative to the
 individual DB variables.
 
+`NODE_ENV` defaults to `production`, and in production the API and seed CLI refuse to start
+without `POSTGRES_PASSWORD` (or a `DATABASE_URL`); there is no fallback password. The `dev` and
+`seed` scripts set `NODE_ENV=development`, where the local password `airports` is the default.
+The compose files pass the password explicitly, so `docker compose up` needs nothing extra; for
+any real deployment, set your own `POSTGRES_PASSWORD`.
+
 ## Tests
 
 | Command                 | Scope                                                    | Needs                              |

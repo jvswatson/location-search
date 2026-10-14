@@ -5,12 +5,12 @@
   "scripts": {
     "build": "nest build",
     "start": "node dist/main.js",
-    "dev": "nest start --watch",
+    "dev": "NODE_ENV=development nest start --watch",
     "typecheck": "tsc --noEmit",
     "test:unit": "vitest run --config vitest.config.ts",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "test:e2e": "vitest run --config vitest.e2e.config.ts",
-    "seed": "node dist/database/seed/seed.cli.js",
+    "seed": "NODE_ENV=${NODE_ENV:-development} node dist/database/seed/seed.cli.js",
     "migration:run": "typeorm migration:run -d dist/database/data-source.js"
   },
   "dependencies": {

@@ -35,7 +35,21 @@ export const envSchema = Joi.object<AppEnv>({
   DB_HOST: Joi.string().default('localhost'),
   DB_PORT: Joi.number().port().default(5432),
   POSTGRES_USER: Joi.string().default('airports'),
-  POSTGRES_PASSWORD: Joi.string().allow('').default('airports'),
+  // The local-dev default must never reach a real deployment: in production the password has to be
+  // given explicitly (or carried by DATABASE_URL).
+  POSTGRES_PASSWORD: Joi.when('NODE_ENV', {
+    is: 'production',
+    then: Joi.when('DATABASE_URL', {
+      is: Joi.exist(),
+      then: Joi.string().allow(''),
+      otherwise: Joi.string().required().messages({
+        'any.required':
+          '"POSTGRES_PASSWORD" is required when NODE_ENV is production (or set DATABASE_URL)',
+        'string.empty': '"POSTGRES_PASSWORD" must not be empty when NODE_ENV is production',
+      }),
+    }),
+    otherwise: Joi.string().allow('').default('airports'),
+  }),
   POSTGRES_DB: Joi.string().default('airports'),
   DB_LOGGING: Joi.boolean().default(false),
   RATE_LIMIT_LIMIT: Joi.number().integer().min(1).default(100),
