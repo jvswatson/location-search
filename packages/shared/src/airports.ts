@@ -108,3 +108,46 @@ export const MAX_RADIUS_MI = 3000;
 export const DEFAULT_PAGE_LIMIT = 25;
 export const MAX_PAGE_LIMIT = 100;
 export const MAX_NEAREST_K = 50;
+export const DEFAULT_NEAREST_K = 5;
+/** Longest accepted `q` after trimming. */
+export const MAX_QUERY_LENGTH = 100;
+
+/** Response of POST /airports/within: every airport inside the polygon, sorted by name. */
+export interface WithinResponse {
+  data: AirportDto[];
+  total: number;
+}
+
+/** Response of GET /airports/:icao/nearest: the origin plus its k nearest airports, closest first. */
+export interface NearestResponse {
+  origin: AirportDto;
+  data: AirportDto[];
+}
+
+/** Returned for `format=geojson` or `Accept: application/geo+json` on /airports and /points. */
+export const GEOJSON_MEDIA_TYPE = 'application/geo+json';
+export const RESPONSE_FORMATS = ['json', 'geojson'] as const;
+export type ResponseFormat = (typeof RESPONSE_FORMATS)[number];
+
+export interface PointFeature<P> {
+  type: 'Feature';
+  geometry: { type: 'Point'; coordinates: [lng: number, lat: number] };
+  properties: P;
+}
+
+export interface FeatureCollection<P> {
+  type: 'FeatureCollection';
+  features: PointFeature<P>[];
+}
+
+export type AirportFeatureProperties = Omit<AirportDto, 'lat' | 'lng'>;
+
+/** GeoJSON form of GET /airports: one feature per airport on the page, plus the page meta. */
+export interface AirportFeatureCollection extends FeatureCollection<AirportFeatureProperties> {
+  meta: PageMeta;
+}
+
+/** GeoJSON form of GET /airports/points. */
+export interface PointFeatureCollection extends FeatureCollection<{ icaoCode: string }> {
+  total: number;
+}

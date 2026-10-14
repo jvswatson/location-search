@@ -7,6 +7,7 @@ export default defineConfig({
     globals: true,
     root: './',
     include: ['test/e2e/**/*.e2e-spec.ts'],
+    globalSetup: ['test/helpers/postgis.global-setup.ts'],
     passWithNoTests: true,
     // Random file and test order every run (seed is printed) to catch shared-state coupling.
     sequence: { shuffle: { files: true, tests: true } },
