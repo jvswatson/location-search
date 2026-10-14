@@ -7,6 +7,8 @@ search within a radius. Everything combines: text, filters and radius apply toge
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): containers, request pipeline, and browser-to-database
   call diagrams
 - [docs/REPO_STRUCTURE.md](docs/REPO_STRUCTURE.md): what each folder (and notable file) is for
+- [docs/CI.md](docs/CI.md): git hooks and the GitHub Actions workflow, and what runs on push vs
+  what needs a manual step
 
 ## Prerequisites
 

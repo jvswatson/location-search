@@ -3,7 +3,8 @@
 Two containers: one Node process serves both the React UI and the JSON API, and one Postgres +
 PostGIS database holds 4,187 airports. The API is read-only. Units at the HTTP boundary are miles
 and feet; PostGIS works in meters internally. Folder-by-folder details are in
-[REPO_STRUCTURE.md](REPO_STRUCTURE.md).
+[REPO_STRUCTURE.md](REPO_STRUCTURE.md); how changes are checked (git hooks and GitHub Actions) is
+in [CI.md](CI.md).
 
 ## Deployment (Docker Compose)
 
