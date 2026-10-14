@@ -140,6 +140,8 @@ start (`seed.cli.js --if-empty`), then serves the API and the built UI on port 3
   `docker`, `ci`, `deps`, `repo`.
 - **Husky hooks:** pre-commit runs lint-staged (ESLint + Prettier), commit-msg runs commitlint,
   pre-push runs typecheck and unit tests.
+- **`main` is protected:** changes go through a pull request and merge only when all five CI checks
+  pass; direct pushes are rejected for everyone. See [docs/CI.md](docs/CI.md#branch-protection).
 - **Supply-chain settings** in `pnpm-workspace.yaml`: `minimumReleaseAge` refuses package versions
   published less than 3 days ago, and `allowBuilds` blocks dependency install scripts unless
   explicitly allowed.

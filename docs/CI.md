@@ -107,12 +107,10 @@ types `opened`, `synchronize`, `reopened`):
 | Push more commits to a PR's branch                           | Once per push (`synchronize`)                               |
 | Close and reopen a PR                                        | Once                                                        |
 | Edit a PR's title or description, add labels or reviewers    | No                                                          |
-| Merge a PR into `main`                                       | Once, as a `push` to `main`                                 |
-| Push directly to `main`                                      | Once                                                        |
+| Merge a PR into `main` (once all five checks pass)           | Once, as a `push` to `main`                                 |
+| Push directly to `main`                                      | **Rejected** by the `protect-main` ruleset (see below)      |
 | Push a tag                                                   | No                                                          |
 | Push again (same PR, or `main`) before the previous run ends | The older run is cancelled; only the newest commit finishes |
-
-**Your first push** (`git push -u origin main`) triggers exactly one CI run.
 
 ### Needs a manual action
 
@@ -122,7 +120,7 @@ types `opened`, `synchronize`, `reopened`):
 | Start CI without pushing                   | There is no `workflow_dispatch` trigger                                                                                                                     | Push a commit, or re-run an existing run. Adding `workflow_dispatch:` under `on:` would add a **Run workflow** button |
 | See coverage                               | Uploaded as an artifact, not reported inline                                                                                                                | Actions → the run → Artifacts → `unit-coverage`                                                                       |
 | Debug a Playwright failure                 | Report and traces are uploaded only when the e2e job fails                                                                                                  | Artifacts → `playwright-report` (open `index.html`; traces load in trace.playwright.dev)                              |
-| Block merging until CI passes              | GitHub doesn't require checks by default                                                                                                                    | Settings → Branches → add a rule for `main` and require the five checks                                               |
+| Change branch protection                   | It's a repo setting, applied once                                                                                                                           | See [Branch protection](#branch-protection) below                                                                     |
 | Approve CI for an outside contributor's PR | On public repos GitHub can hold workflow runs from fork PRs until approved (by default, for contributors new to GitHub; configurable in Settings → Actions) | Approve the run on the PR                                                                                             |
 | Deploy, or publish images                  | No deploy job exists and images are built with `push: false`                                                                                                | Not set up yet; this would be a new job (and secrets)                                                                 |
 
@@ -134,9 +132,67 @@ types `opened`, `synchronize`, `reopened`):
   gets CI only once it has a PR. Open a draft PR for early CI feedback.
 - **A PR run tests the merge result.** `pull_request` checks out GitHub's merge of the PR into its
   base branch, so it also catches conflicts with changes that landed on `main` since you branched.
-- **Rapid pushes to `main` cancel each other** too (`cancel-in-progress`), so a commit superseded
+- **Rapid merges to `main` cancel each other** too (`cancel-in-progress`), so a merge superseded
   within the run's duration won't get its own result; the newest one always does.
 - **Permissions are read-only** (`contents: read`) and the workflow uses no secrets, so a PR can't
   push code or read credentials through it.
 - **`HUSKY=0` in CI** stops the git hooks from running on the runners, since CI runs the same checks
   as explicit steps.
+
+## Branch protection
+
+`main` is protected by a repository **ruleset** named `protect-main`, with **no bypass list**:
+nobody, including the repo owner and admins, can push to `main` directly. Every change lands
+through a pull request whose five CI checks have passed.
+
+| Rule                                  | Effect                                                                                                                                                                                                                                |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Require a pull request before merging | No direct pushes to `main`. Required approvals: **0**, because you can't approve your own PR                                                                                                                                          |
+| Require status checks to pass         | The five jobs must succeed on the PR: `Lint, format, typecheck`, `Unit tests`, `API integration tests`, `API e2e + Playwright`, `Docker images` (each pinned to the GitHub Actions app, so another app can't post a lookalike status) |
+| Block force pushes                    | History on `main` can't be rewritten                                                                                                                                                                                                  |
+| Restrict deletions                    | `main` can't be deleted                                                                                                                                                                                                               |
+
+"Require branches to be up to date" is off: PR runs already test the merge with the latest `main`.
+
+### Day-to-day flow
+
+```mermaid
+flowchart LR
+  br["git switch -c my-change"] --> commit["commit<br/>(hooks run)"]
+  commit --> push["git push -u origin my-change<br/>(pre-push runs)"]
+  push --> pr["gh pr create --fill"]
+  pr --> ci{{"CI: five checks"}}
+  ci -- "any fail" --> fix["fix, commit, push<br/>(CI re-runs)"]
+  fix --> ci
+  ci -- "all pass" --> merge["gh pr merge --squash --delete-branch"]
+  merge --> main(["main updated,<br/>CI runs on main"])
+  direct["git push origin main"] -. "rejected by protect-main" .-> main
+```
+
+```bash
+git switch -c my-change
+# …edit, commit…
+git push -u origin my-change
+gh pr create --fill
+gh pr checks --watch                      # wait for the five checks
+gh pr merge --squash --delete-branch
+git switch main && git pull
+```
+
+### Viewing or changing it
+
+- **UI:** Settings → Rules → Rulesets → `protect-main`.
+- **As code:** [`.github/rulesets/protect-main.json`](../.github/rulesets/protect-main.json) is the
+  ruleset definition. GitHub doesn't read it from the repo automatically; it's applied through the
+  API. To recreate the ruleset (e.g. on a fork) or apply edits to it:
+
+  ```bash
+  # create (when it doesn't exist yet)
+  gh api -X POST repos/jvswatson/location-search/rulesets --input .github/rulesets/protect-main.json
+  # update the existing one in place
+  gh api -X PUT repos/jvswatson/location-search/rulesets/$(gh api repos/jvswatson/location-search/rulesets --jq '.[] | select(.name=="protect-main") | .id') --input .github/rulesets/protect-main.json
+  ```
+
+- **Renaming a CI job** changes its check name; update the ruleset at the same time, or PRs will
+  wait forever for a check that no longer reports.
+- Rulesets are free on **public** repos; on a private repo they need GitHub Pro (or a paid plan).
