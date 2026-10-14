@@ -80,6 +80,24 @@ describe('search and filters', () => {
     expect(rec.airports.filter((u) => u.searchParams.has('q'))).toHaveLength(1);
   });
 
+  it('holds the page reset back with the debounced query (no stale-q request)', async () => {
+    const rec = mockApi({
+      airports: (url) =>
+        paginated([makeAirport(1)], 100, Number(url.searchParams.get('page') ?? 1)),
+    });
+    renderApp();
+    await screen.findAllByTestId('airport-row');
+    await userEvent.click(screen.getByRole('button', { name: 'Next' }));
+    await waitFor(() => expect(params(last(rec.airports)).page).toBe('2'));
+    const before = rec.airports.length;
+
+    await userEvent.type(screen.getByLabelText('Search airports'), 'abc');
+    await waitFor(() => expect(params(last(rec.airports))).toMatchObject({ q: 'abc', page: '1' }));
+
+    // Exactly one request after typing: the new q together with the page reset.
+    expect(rec.airports.slice(before).map(params)).toEqual([{ q: 'abc', page: '1', limit: '25' }]);
+  });
+
   it('composes countries, altitude and hasIata and resets to page 1', async () => {
     const rec = mockApi({
       airports: (url) =>

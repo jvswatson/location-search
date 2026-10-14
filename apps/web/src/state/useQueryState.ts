@@ -35,24 +35,19 @@ export function useQueryState() {
     window.history.replaceState(null, '', url);
   }, [state]);
 
-  const lagging = useMemo(
-    () => ({
-      q: state.q,
-      radiusMi: state.radiusMi,
-      minAltitudeFt: state.minAltitudeFt,
-      maxAltitudeFt: state.maxAltitudeFt,
-    }),
-    [state.q, state.radiusMi, state.minAltitudeFt, state.maxAltitudeFt],
-  );
-  const debounced = useDebouncedValue(lagging, DEBOUNCE_MS);
-
-  const queryState = useMemo(() => {
-    const { minAltitudeFt: _a, maxAltitudeFt: _b, ...rest } = state;
-    const next: QueryState = { ...rest, q: debounced.q, radiusMi: debounced.radiusMi };
-    if (debounced.minAltitudeFt !== undefined) next.minAltitudeFt = debounced.minAltitudeFt;
-    if (debounced.maxAltitudeFt !== undefined) next.maxAltitudeFt = debounced.maxAltitudeFt;
-    return normalizeState(next);
-  }, [state, debounced]);
+  // The whole state settles together: while a debounced field (q, radius, altitude) is changing,
+  // requests keep using the previous settled state. Debouncing those fields alone would let the
+  // immediate page reset escape early, sending a request with the old q at page 1.
+  const settled = useDebouncedValue(state, DEBOUNCE_MS, laggingUnchanged);
+  const queryState = useMemo(() => normalizeState(settled), [settled]);
 
   return { state, update, queryState };
 }
+
+/** Fields whose edits arrive keystroke-by-keystroke or drag-by-drag. */
+const laggingKey = (s: QueryState): string =>
+  JSON.stringify([s.q, s.radiusMi, s.minAltitudeFt ?? null, s.maxAltitudeFt ?? null]);
+
+/** Changes that leave every lagging field alone (country, page, sort, center) apply at once. */
+const laggingUnchanged = (prev: QueryState, next: QueryState): boolean =>
+  laggingKey(prev) === laggingKey(next);
