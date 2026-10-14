@@ -30,25 +30,25 @@ typecheck on whichever side falls out of step.
 
 ## Top level
 
-| Path                                                     | Purpose                                                                                                                                                         |
-| -------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `apps/`                                                  | The two applications: `api` (backend) and `web` (frontend).                                                                                                     |
-| `packages/shared/`                                       | Code shared by both apps (see below).                                                                                                                           |
-| `data/`                                                  | `gadb_postgresql_create_airports_table.sql`, the Global Airport Database (MIT, Arash Partow). Treated as data: the seed script parses it and never executes it. |
-| `docker/`                                                | Dockerfiles: `db/` (Postgres + PostGIS) and `api/` (the app image).                                                                                             |
-| `docs/`                                                  | This file, [ARCHITECTURE.md](ARCHITECTURE.md) (runtime) and [CI.md](CI.md) (hooks + GitHub Actions).                                                            |
-| `.github/workflows/ci.yml`                               | CI: lint/format/typecheck, unit, integration, e2e (API + Playwright) and image builds, all in parallel on every push and PR. See [CI.md](CI.md).                |
-| `.husky/`                                                | Git hooks: `pre-commit` (lint-staged), `commit-msg` (commitlint), `pre-push` (typecheck + unit tests).                                                          |
-| `docker-compose.yml`                                     | Local stack: `db` + `app` on <http://localhost:3000>, with a persistent `db-data` volume.                                                                       |
-| `docker-compose.e2e.yml`                                 | Throwaway stack for Playwright on port 3100 (tmpfs database, generous rate limit).                                                                              |
-| `package.json`                                           | Workspace scripts (`dev`, `typecheck`, `lint`, `test:*`, `docker:*`) and the pinned `packageManager` (pnpm 12).                                                 |
-| `pnpm-workspace.yaml`                                    | Workspace members plus supply-chain settings: `minimumReleaseAge: 4320` (3 days) and `allowBuilds` (every dependency install script is denied unless listed).   |
-| `.env.example`                                           | Template for the one root `.env`, read by Compose and by the api's host scripts.                                                                                |
-| `tsconfig.base.json`                                     | Strict compiler options shared by every package (TypeScript 6.0.x, ES2024).                                                                                     |
-| `eslint.config.mjs`, `.prettierrc.json`, `.editorconfig` | Lint/format rules for the whole repo.                                                                                                                           |
-| `commitlint.config.mjs`                                  | Conventional Commits with the allowed scopes.                                                                                                                   |
-| `.dockerignore`, `.gitignore`, `.nvmrc` (Node 24)        | Housekeeping.                                                                                                                                                   |
-| `CLAUDE.md`                                              | Agreed decisions and toolchain constraints, for anyone (human or agent) changing the code.                                                                      |
+| Path                                                     | Purpose                                                                                                                                                              |
+| -------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `apps/`                                                  | The two applications: `api` (backend) and `web` (frontend).                                                                                                          |
+| `packages/shared/`                                       | Code shared by both apps (see below).                                                                                                                                |
+| `data/`                                                  | `gadb_postgresql_create_airports_table.sql`, the Global Airport Database (MIT, Arash Partow). Treated as data: the seed script parses it and never executes it.      |
+| `docker/`                                                | Dockerfiles: `db/` (Postgres + PostGIS) and `api/` (the app image).                                                                                                  |
+| `docs/`                                                  | This file, [ARCHITECTURE.md](ARCHITECTURE.md) (runtime) and [CI.md](CI.md) (hooks + GitHub Actions).                                                                 |
+| `.github/workflows/ci.yml`                               | CI: lint/format/typecheck, unit, integration, e2e (API + Playwright) and image builds, all in parallel on pushes to `main` and on pull requests. See [CI.md](CI.md). |
+| `.husky/`                                                | Git hooks: `pre-commit` (lint-staged), `commit-msg` (commitlint), `pre-push` (typecheck + unit tests).                                                               |
+| `docker-compose.yml`                                     | Local stack: `db` + `app` on <http://localhost:3000>, with a persistent `db-data` volume.                                                                            |
+| `docker-compose.e2e.yml`                                 | Throwaway stack for Playwright on port 3100 (tmpfs database, generous rate limit).                                                                                   |
+| `package.json`                                           | Workspace scripts (`dev`, `typecheck`, `lint`, `test:*`, `docker:*`) and the pinned `packageManager` (pnpm 12).                                                      |
+| `pnpm-workspace.yaml`                                    | Workspace members plus supply-chain settings: `minimumReleaseAge: 4320` (3 days) and `allowBuilds` (every dependency install script is denied unless listed).        |
+| `.env.example`                                           | Template for the one root `.env`, read by Compose and by the api's host scripts.                                                                                     |
+| `tsconfig.base.json`                                     | Strict compiler options shared by every package (TypeScript 6.0.x, ES2024).                                                                                          |
+| `eslint.config.mjs`, `.prettierrc.json`, `.editorconfig` | Lint/format rules for the whole repo.                                                                                                                                |
+| `commitlint.config.mjs`                                  | Conventional Commits with the allowed scopes.                                                                                                                        |
+| `.dockerignore`, `.gitignore`, `.nvmrc` (Node 24)        | Housekeeping.                                                                                                                                                        |
+| `CLAUDE.md`                                              | Agreed decisions and toolchain constraints, for anyone (human or agent) changing the code.                                                                           |
 
 ## `packages/shared`: the API contract
 

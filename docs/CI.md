@@ -18,7 +18,7 @@ flowchart LR
   end
 
   subgraph gh["GitHub"]
-    ev{{"push or<br/>pull_request event"}}
+    ev{{"push to main or<br/>pull_request event"}}
     wf["CI workflow<br/>.github/workflows/ci.yml"]
   end
 
@@ -41,7 +41,7 @@ another (there are no `needs:` dependencies). The run is green only when all fiv
 
 ```mermaid
 flowchart TB
-  trigger{{"push · pull_request"}} --> setup
+  trigger{{"push to main · pull_request"}} --> setup
 
   subgraph setup["Every Node job starts with"]
     s1["checkout"] --> s2["corepack enable"] --> s3["setup-node<br/>(.nvmrc, pnpm cache)"] --> s4["pnpm install --frozen-lockfile<br/>(minimumReleaseAge + allowBuilds enforced)"]
@@ -90,16 +90,29 @@ sequenceDiagram
 
 ### Starts by itself
 
-| You do                                    | What runs                                                          | Where          |
-| ----------------------------------------- | ------------------------------------------------------------------ | -------------- |
-| `git commit`                              | `pre-commit` (lint-staged), then `commit-msg` (commitlint)         | your machine   |
-| `git push`                                | `pre-push` (typecheck + unit tests, ~20–40 s), then the push       | your machine   |
-| push reaches GitHub (any branch, any tag) | the full CI workflow: all 5 jobs                                   | GitHub Actions |
-| open a PR, or push more commits to one    | the full CI workflow again, for the PR                             | GitHub Actions |
-| push again before a run finishes          | the older run **for the same branch** is cancelled (`concurrency`) | GitHub Actions |
+On your machine, every time:
 
-**Your first push** (`git push -u origin main`) triggers exactly one CI run: the `push` event on
-`main`.
+| You do       | What runs                                                    |
+| ------------ | ------------------------------------------------------------ |
+| `git commit` | `pre-commit` (lint-staged), then `commit-msg` (commitlint)   |
+| `git push`   | `pre-push` (typecheck + unit tests, ~20–40 s), then the push |
+
+On GitHub, the workflow triggers on `push` to `main` and on `pull_request` (default activity
+types `opened`, `synchronize`, `reopened`):
+
+| Event                                                        | CI runs?                                                    |
+| ------------------------------------------------------------ | ----------------------------------------------------------- |
+| Push a feature branch that has **no PR**                     | **No.** Only the local hooks check it until a PR is opened  |
+| Open a PR (drafts included), against any base branch         | Once                                                        |
+| Push more commits to a PR's branch                           | Once per push (`synchronize`)                               |
+| Close and reopen a PR                                        | Once                                                        |
+| Edit a PR's title or description, add labels or reviewers    | No                                                          |
+| Merge a PR into `main`                                       | Once, as a `push` to `main`                                 |
+| Push directly to `main`                                      | Once                                                        |
+| Push a tag                                                   | No                                                          |
+| Push again (same PR, or `main`) before the previous run ends | The older run is cancelled; only the newest commit finishes |
+
+**Your first push** (`git push -u origin main`) triggers exactly one CI run.
 
 ### Needs a manual action
 
@@ -115,10 +128,14 @@ sequenceDiagram
 
 ### Worth knowing
 
-- **PR branches run CI twice.** `push` and `pull_request` both fire for a branch in this repo
-  that has an open PR, and they use different refs, so `concurrency` doesn't merge them. Harmless,
-  but twice the minutes. Limiting `push` to `branches: [main]` would leave one run per PR.
-- **Tag pushes run CI too**, because `push` has no branch or tag filter.
+- **One run per PR push, by design.** `push` is limited to `main`, so a commit pushed to a PR
+  branch fires only `pull_request`. (Without the limit, `push` and `pull_request` would both fire,
+  on different refs that `concurrency` can't merge, doubling the minutes.) The trade-off: a branch
+  gets CI only once it has a PR. Open a draft PR for early CI feedback.
+- **A PR run tests the merge result.** `pull_request` checks out GitHub's merge of the PR into its
+  base branch, so it also catches conflicts with changes that landed on `main` since you branched.
+- **Rapid pushes to `main` cancel each other** too (`cancel-in-progress`), so a commit superseded
+  within the run's duration won't get its own result; the newest one always does.
 - **Permissions are read-only** (`contents: read`) and the workflow uses no secrets, so a PR can't
   push code or read credentials through it.
 - **`HUSKY=0` in CI** stops the git hooks from running on the runners, since CI runs the same checks

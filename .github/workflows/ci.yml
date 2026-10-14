@@ -1,7 +1,11 @@
 name: CI
 
 on:
+  # Pushes to main only (direct pushes and merges). Feature branches are covered by their PR's
+  # run, so limiting this avoids a second, duplicate run for every PR push. Tags don't run CI.
   push:
+    branches: [main]
+  # Default activity types: opened, synchronize (new commits), reopened.
   pull_request:
 
 permissions:
