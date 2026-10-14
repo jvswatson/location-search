@@ -1,0 +1,14 @@
+packages:
+  - apps/*
+  - packages/*
+
+# Supply-chain guard: refuse any package version published less than 3 days ago.
+minimumReleaseAge: 4320
+
+# Dependency install scripts are blocked unless listed here as true.
+allowBuilds:
+  '@scarf/scarf': false # install-time telemetry ping from swagger-ui-dist
+  cpu-features: false # optional native addon (testcontainers -> ssh2); pure-JS fallback is fine
+  ssh2: false # optional native crypto binding; pure-JS fallback is fine
+  protobufjs: false # postinstall only prints a version check
+  msw: false # postinstall copies the browser service worker; tests use msw/node
