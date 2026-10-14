@@ -5,13 +5,13 @@
   "scripts": {
     "build": "nest build",
     "start": "node dist/main.js",
-    "dev": "NODE_ENV=development nest start --watch",
+    "dev": "NODE_ENV=development node --env-file-if-exists=../../.env node_modules/@nestjs/cli/bin/nest.js start --watch",
     "typecheck": "tsc --noEmit",
     "test:unit": "vitest run --config vitest.config.ts",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "test:e2e": "vitest run --config vitest.e2e.config.ts",
-    "seed": "NODE_ENV=${NODE_ENV:-development} node dist/database/seed/seed.cli.js",
-    "migration:run": "typeorm migration:run -d dist/database/data-source.js"
+    "seed": "NODE_ENV=${NODE_ENV:-development} node --env-file-if-exists=../../.env dist/database/seed/seed.cli.js",
+    "migration:run": "NODE_ENV=${NODE_ENV:-development} node --env-file-if-exists=../../.env node_modules/typeorm/cli.js migration:run -d dist/database/data-source.js"
   },
   "dependencies": {
     "@location-search/shared": "workspace:*",

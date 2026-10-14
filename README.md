@@ -40,6 +40,13 @@ pnpm dev            # builds shared, then runs api and web in watch mode
 `RATE_LIMIT_LIMIT`, `RATE_LIMIT_TTL_MS`). `DATABASE_URL` is accepted as an alternative to the
 individual DB variables.
 
+One `.env` at the repo root configures everything: Docker Compose reads it for `${…}`
+substitution, and the api's `dev`, `seed` and `migration:run` scripts load it with
+`node --env-file-if-exists`, so it is optional. Variables already set in your shell win over the
+file. Postgres applies `POSTGRES_PASSWORD` only when its data volume is first created; after
+changing it, either `ALTER USER` in psql or reset with `pnpm docker:down -v` (re-seeds on the next
+start).
+
 `NODE_ENV` defaults to `production`, and in production the API and seed CLI refuse to start
 without `POSTGRES_PASSWORD` (or a `DATABASE_URL`); there is no fallback password. The `dev` and
 `seed` scripts set `NODE_ENV=development`, where the local password `airports` is the default.
