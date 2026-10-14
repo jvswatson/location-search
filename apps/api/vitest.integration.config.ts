@@ -7,6 +7,7 @@ export default defineConfig({
     globals: true,
     root: './',
     include: ['test/integration/**/*.int-spec.ts'],
+    globalSetup: ['test/helpers/postgis.global-setup.ts'],
     passWithNoTests: true,
     fileParallelism: false,
     hookTimeout: 180_000,
