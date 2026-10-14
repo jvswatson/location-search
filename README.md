@@ -4,6 +4,10 @@ A read-only airport search app. A NestJS + PostGIS API serves 4,187 airports fro
 a React + Leaflet UI lets you search by text, filter, and narrow results by clicking the map to
 search within a radius. Everything combines: text, filters and radius apply together.
 
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): containers, request pipeline, and browser-to-database
+  call diagrams
+- [docs/REPO_STRUCTURE.md](docs/REPO_STRUCTURE.md): what each folder (and notable file) is for
+
 ## Prerequisites
 
 - **Docker Desktop** (runs Postgres/PostGIS, the app image and the Testcontainers-based tests).
