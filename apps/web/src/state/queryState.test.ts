@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_PAGE_LIMIT, MAX_RADIUS_MI } from '@location-search/shared';
+import { DEFAULT_PAGE_LIMIT, MAX_COUNTRIES, MAX_RADIUS_MI } from '@location-search/shared';
 import {
   effectiveOrder,
   effectiveSort,
@@ -19,16 +19,71 @@ const full: QueryState = {
   minAltitudeFt: -100,
   maxAltitudeFt: 5000,
   hasIata: true,
+  areaMode: 'radius',
   center: { lat: 40.64, lng: -73.78 },
   radiusMi: 123,
+  bbox: null,
   sort: 'altitude',
   order: 'desc',
   page: 3,
 };
 
+const rectangle: QueryState = {
+  ...initialState,
+  areaMode: 'rectangle',
+  bbox: [-1.5, 51.1, 0.25, 51.9],
+  sort: 'distance',
+};
+
 describe('serializeState / parseState', () => {
   it('round-trips a full state', () => {
     expect(parseState(serializeState(full))).toEqual(full);
+  });
+
+  it('round-trips a rectangle as area=rectangle&bbox=…', () => {
+    const qs = serializeState(rectangle);
+    expect(qs).toBe('area=rectangle&bbox=-1.5%2C51.1%2C0.25%2C51.9&sort=distance');
+    expect(parseState(qs)).toEqual(rectangle);
+  });
+
+  it('keeps rectangle mode with no box drawn yet', () => {
+    const empty = { ...initialState, areaMode: 'rectangle' as const };
+    expect(serializeState(empty)).toBe('area=rectangle');
+    expect(parseState('area=rectangle')).toEqual(empty);
+  });
+
+  it('infers rectangle mode from a bbox alone', () => {
+    expect(parseState('bbox=-1,51,1,52')).toMatchObject({
+      areaMode: 'rectangle',
+      bbox: [-1, 51, 1, 52],
+    });
+  });
+
+  it('only restores the area that belongs to the mode', () => {
+    expect(parseState('lat=51&lng=0&bbox=-1,51,1,52')).toMatchObject({
+      areaMode: 'rectangle',
+      center: null,
+      bbox: [-1, 51, 1, 52],
+    });
+    expect(parseState('area=radius&lat=51&lng=0&bbox=-1,51,1,52')).toMatchObject({
+      areaMode: 'radius',
+      center: { lat: 51, lng: 0 },
+      bbox: null,
+    });
+  });
+
+  it.each(['1,2,3', '1,2,0,3', '-181,0,0,1', 'a,b,c,d', '0,10,1,5'])(
+    'drops an invalid bbox %s',
+    (raw) => {
+      expect(parseState(`bbox=${raw}`)).toMatchObject({ areaMode: 'radius', bbox: null });
+    },
+  );
+
+  it(`keeps at most ${MAX_COUNTRIES} countries from a hand-edited URL`, () => {
+    const qs = Array.from({ length: MAX_COUNTRIES + 5 }, (_, i) => `country=C${i}`).join('&');
+    const { countries } = parseState(qs);
+    expect(countries).toHaveLength(MAX_COUNTRIES);
+    expect(countries[0]).toBe('C0');
   });
 
   it('serializes the initial state to an empty string and back', () => {
@@ -72,8 +127,9 @@ describe('serializeState / parseState', () => {
 });
 
 describe('isFilterActive', () => {
-  it('is false for page, sort and radius alone', () => {
+  it('is false for page, sort, radius and mode alone', () => {
     expect(isFilterActive({ ...initialState, page: 4, sort: 'icao', radiusMi: 500 })).toBe(false);
+    expect(isFilterActive({ ...initialState, areaMode: 'rectangle' })).toBe(false);
     expect(isFilterActive({ ...initialState, q: '   ' })).toBe(false);
   });
 
@@ -84,6 +140,7 @@ describe('isFilterActive', () => {
     { maxAltitudeFt: 0 },
     { hasIata: true },
     { center: { lat: 1, lng: 2 } },
+    { areaMode: 'rectangle' as const, bbox: [-1, 51, 1, 52] as [number, number, number, number] },
   ])('is true for %o', (patch) => {
     expect(isFilterActive({ ...initialState, ...patch })).toBe(true);
   });
@@ -94,6 +151,8 @@ describe('sort helpers', () => {
     expect(effectiveSort(initialState)).toBe('name');
     expect(effectiveSort({ ...initialState, q: 'a' })).toBe('relevance');
     expect(effectiveSort({ ...initialState, center: { lat: 0, lng: 0 } })).toBe('distance');
+    expect(effectiveSort(rectangle)).toBe('distance');
+    expect(effectiveSort({ ...rectangle, sort: undefined })).toBe('distance');
     expect(effectiveOrder(initialState)).toBe('asc');
   });
 
@@ -101,6 +160,11 @@ describe('sort helpers', () => {
     expect(normalizeState({ ...initialState, sort: 'relevance', order: 'asc' })).toEqual(
       initialState,
     );
+  });
+
+  it('normalizeState keeps distance with a rectangle and drops it without an area', () => {
+    expect(normalizeState(rectangle).sort).toBe('distance');
+    expect(normalizeState({ ...rectangle, bbox: null }).sort).toBeUndefined();
   });
 });
 
@@ -117,5 +181,9 @@ describe('params', () => {
       lng: -73.78,
       radiusMi: 123,
     });
+  });
+
+  it('sends the rectangle as bbox and no radius', () => {
+    expect(toFilterParams(rectangle)).toEqual({ bbox: [-1.5, 51.1, 0.25, 51.9] });
   });
 });

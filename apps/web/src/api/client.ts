@@ -1,13 +1,18 @@
-import type {
-  AirportDto,
-  AirportSearchParams,
-  CountryCount,
-  ErrorResponse,
-  Paginated,
-  PointsResponse,
+import {
+  type AirportDto,
+  type AirportSearchParams,
+  type CountryCount,
+  type ErrorResponse,
+  MAX_REQUEST_URL_LENGTH,
+  type Paginated,
+  type PointsResponse,
 } from '@location-search/shared';
 
 const BASE = '/api/v1';
+
+/** Shown when a request is too long to send (refused here, or a 414 from the API). */
+export const REQUEST_TOO_LARGE_MESSAGE =
+  'This search is too large to send. Remove some filters or simplify the search area.';
 
 export class ApiError extends Error {
   readonly status: number;
@@ -54,6 +59,10 @@ export function pointsQuery(params: AirportSearchParams): string {
 
 async function getJson<T>(path: string, query: string, signal?: AbortSignal): Promise<T> {
   const url = new URL(`${BASE}${path}${query ? `?${query}` : ''}`, window.location.origin);
+  // Same limit the API enforces with a 414; refusing here avoids a pointless round trip.
+  if (url.pathname.length + url.search.length > MAX_REQUEST_URL_LENGTH) {
+    throw new ApiError(414, REQUEST_TOO_LARGE_MESSAGE);
+  }
   let res: Response;
   try {
     res = await fetch(url, { signal, headers: { Accept: 'application/json' } });

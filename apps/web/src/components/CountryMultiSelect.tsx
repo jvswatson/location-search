@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react';
-import type { CountryCount } from '@location-search/shared';
+import { type CountryCount, MAX_COUNTRIES } from '@location-search/shared';
 import { formatInt } from '../lib/format';
 
 interface Props {
@@ -36,6 +36,8 @@ export function CountryMultiSelect({ countries, selected, onChange, loading }: P
       selected.includes(country) ? selected.filter((c) => c !== country) : [...selected, country],
     );
 
+  // The API accepts at most MAX_COUNTRIES; past that, only unchecking is possible.
+  const atLimit = selected.length >= MAX_COUNTRIES;
   const needle = filter.trim().toLowerCase();
   const visible = needle
     ? countries.filter((c) => c.country.toLowerCase().includes(needle))
@@ -78,6 +80,11 @@ export function CountryMultiSelect({ countries, selected, onChange, loading }: P
               Clear
             </button>
           </div>
+          {atLimit && (
+            <p role="status" className="px-1 pb-2 text-xs text-amber-700">
+              Up to {MAX_COUNTRIES} countries can be selected. Clear some to choose others.
+            </p>
+          )}
           {loading && <p className="px-1 py-2 text-sm text-slate-500">Loading countries…</p>}
           {!loading && visible.length === 0 && (
             <p className="px-1 py-2 text-sm text-slate-500">No countries found.</p>
@@ -89,6 +96,7 @@ export function CountryMultiSelect({ countries, selected, onChange, loading }: P
                   <input
                     type="checkbox"
                     checked={selected.includes(c.country)}
+                    disabled={atLimit && !selected.includes(c.country)}
                     onChange={() => toggle(c.country)}
                   />
                   <span className="flex-1">{c.country}</span>

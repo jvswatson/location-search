@@ -94,7 +94,7 @@ test('clearing the location drops the circle and distance column', async ({ page
   await openApp(page, londonUrl(50));
   await expect(page.getByRole('columnheader', { name: /Distance/ })).toBeVisible();
 
-  await page.getByRole('button', { name: 'Clear location' }).click();
+  await page.getByRole('button', { name: 'Clear area' }).click();
   await expect(map(page)).not.toHaveAttribute('data-center', /.*/);
   await expect(page.getByRole('columnheader', { name: /Distance/ })).toHaveCount(0);
   await expect(page.getByTestId('map-prompt')).toBeVisible();
