@@ -15,6 +15,7 @@ blob-report/
 # OS / editor
 .DS_Store
 .idea/
+.obsidian/
 .vscode/*
 !.vscode/extensions.json
 
