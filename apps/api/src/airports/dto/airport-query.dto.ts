@@ -1,5 +1,6 @@
 import {
   DEFAULT_PAGE_LIMIT,
+  MAX_COUNTRIES,
   MAX_PAGE_LIMIT,
   MAX_QUERY_LENGTH,
   MAX_RADIUS_MI,
@@ -77,13 +78,13 @@ export class AirportFiltersQueryDto {
   q?: string;
 
   @ApiPropertyOptional({
-    description: 'Exact country name; repeat for several (matches any).',
+    description: `Exact country name; repeat for several (matches any). At most ${MAX_COUNTRIES}.`,
     type: [String],
     example: ['France', 'Spain'],
   })
   @IsOptional()
   @Transform(toArray)
-  @ArrayMaxSize(50)
+  @ArrayMaxSize(MAX_COUNTRIES, { message: `country accepts at most ${MAX_COUNTRIES} values` })
   @IsString({ each: true })
   @IsNotEmpty({ each: true })
   country?: string[];
@@ -149,7 +150,8 @@ export class AirportFiltersQueryDto {
   radiusMi?: number;
 
   @ApiPropertyOptional({
-    description: 'Bounding box `minLng,minLat,maxLng,maxLat` (no antimeridian wrap).',
+    description:
+      'Bounding box `minLng,minLat,maxLng,maxLat` (no antimeridian wrap). Not combinable with lat/lng/radiusMi. Distances (and the default distance sort) are measured from its midpoint, returned as meta.center.',
     example: '-10,35,5,60',
   })
   @IsOptional()

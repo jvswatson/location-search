@@ -70,6 +70,20 @@ describe('AirportsService', () => {
     expect(result.data.map((a) => a.icaoCode)).toEqual(['AAAA']);
   });
 
+  it('search reports the distance reference point as meta.center (rounded to 5 dp)', async () => {
+    const { repo, service } = setup();
+    repo.search.mockResolvedValue({ rows: [], total: 0 });
+
+    const boxed = await service.search({ bbox: '-0.123456,51.1,0.2,51.9' });
+    expect(boxed.meta.center).toEqual({ lat: 51.5, lng: 0.03827 });
+    expect(repo.search).toHaveBeenLastCalledWith(
+      expect.objectContaining({ bbox: [-0.123456, 51.1, 0.2, 51.9], sort: 'distance' }),
+    );
+
+    const radius = await service.search({ lat: 40.64, lng: -73.779, radiusMi: 10 });
+    expect(radius.meta.center).toEqual({ lat: 40.64, lng: -73.779 });
+  });
+
   it('search reports zero pages for no matches', async () => {
     const { repo, service } = setup();
     repo.search.mockResolvedValue({ rows: [], total: 0 });

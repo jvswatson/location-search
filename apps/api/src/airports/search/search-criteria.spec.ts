@@ -1,5 +1,11 @@
 import { DEFAULT_PAGE_LIMIT } from '@location-search/shared';
-import { defaultOrder, defaultSort, resolveFilters, resolveSearch } from './search-criteria.js';
+import {
+  defaultOrder,
+  defaultSort,
+  referencePoint,
+  resolveFilters,
+  resolveSearch,
+} from './search-criteria.js';
 
 const center = { lat: 51.5, lng: -0.12, radiusMi: 25 };
 
@@ -58,11 +64,31 @@ describe('resolveFilters', () => {
     });
     const result = resolveFilters({ lat: 1, minAltitudeFt: 5, maxAltitudeFt: 1, bbox: '1,1,0,2' });
     expect(result.ok).toBe(false);
-    expect(!result.ok && result.errors).toHaveLength(3);
+    // partial radius, altitude range, bad bbox, and radius + bbox together
+    expect(!result.ok && result.errors).toHaveLength(4);
+  });
+
+  it('accepts one area at most: a radius or a bbox', () => {
+    expect(resolveFilters({ ...center, bbox: '-1,51,1,52' })).toEqual({
+      ok: false,
+      errors: ['use either lat, lng and radiusMi or bbox, not both'],
+    });
+    expect(resolveFilters({ lat: 51, bbox: '-1,51,1,52' })).toMatchObject({
+      ok: false,
+      errors: expect.arrayContaining(['use either lat, lng and radiusMi or bbox, not both']),
+    });
   });
 
   it('treats an empty country list as no filter', () => {
     expect(resolveFilters({ country: [] })).toEqual({ ok: true, value: {} });
+  });
+});
+
+describe('referencePoint', () => {
+  it('is the radius center, the bbox lng/lat midpoint, or nothing', () => {
+    expect(referencePoint({ center })).toEqual({ lat: 51.5, lng: -0.12 });
+    expect(referencePoint({ bbox: [-2, 50, 1, 53] })).toEqual({ lat: 51.5, lng: -0.5 });
+    expect(referencePoint({})).toBeUndefined();
   });
 });
 
@@ -71,6 +97,7 @@ describe('defaultSort / defaultOrder', () => {
     [{ q: 'x', center }, 'relevance'],
     [{ q: 'x' }, 'relevance'],
     [{ center }, 'distance'],
+    [{ bbox: [-1, 51, 1, 52] as [number, number, number, number] }, 'distance'],
     [{}, 'name'],
   ] as const)('%j → %s', (criteria, sort) => {
     expect(defaultSort(criteria)).toBe(sort);
@@ -102,16 +129,24 @@ describe('resolveSearch', () => {
     });
   });
 
-  it('rejects relevance without q and distance without a center', () => {
+  it('rejects relevance without q and distance without an area', () => {
     expect(resolveSearch({ sort: 'relevance' })).toEqual({
       ok: false,
       errors: ['sort=relevance requires q'],
     });
     expect(resolveSearch({ sort: 'distance', q: 'x' })).toEqual({
       ok: false,
-      errors: ['sort=distance requires lat, lng and radiusMi'],
+      errors: ['sort=distance requires a radius (lat, lng and radiusMi) or a bbox'],
     });
     expect(resolveSearch({ sort: 'distance', ...center })).toMatchObject({ ok: true });
+    expect(resolveSearch({ sort: 'distance', bbox: '-1,51,1,52' })).toMatchObject({ ok: true });
+  });
+
+  it('defaults to distance from the bbox midpoint', () => {
+    expect(resolveSearch({ bbox: '-1,51,1,52' })).toMatchObject({
+      ok: true,
+      value: { bbox: [-1, 51, 1, 52], sort: 'distance', order: 'asc' },
+    });
   });
 
   it('does not double-report a partial center under sort=distance', () => {

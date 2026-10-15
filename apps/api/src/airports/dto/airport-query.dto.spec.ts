@@ -1,6 +1,7 @@
 import 'reflect-metadata';
 import { BadRequestException, type Type } from '@nestjs/common';
 import {
+  MAX_COUNTRIES,
   MAX_PAGE_LIMIT,
   MAX_QUERY_LENGTH,
   MAX_RADIUS_MI,
@@ -76,6 +77,17 @@ describe('AirportSearchQueryDto', () => {
   it('accepts repeated country values', async () => {
     const dto = await validate(AirportSearchQueryDto, { country: ['France', ' Spain '] });
     expect(dto.country).toEqual(['France', 'Spain']);
+  });
+
+  it(`accepts up to ${MAX_COUNTRIES} countries and rejects more`, async () => {
+    const names = (n: number) => Array.from({ length: n }, (_, i) => `Country ${i}`);
+    expect(
+      (await validate(AirportSearchQueryDto, { country: names(MAX_COUNTRIES) })).country,
+    ).toHaveLength(MAX_COUNTRIES);
+    const { message } = await messages(AirportSearchQueryDto, {
+      country: names(MAX_COUNTRIES + 1),
+    });
+    expect(message).toEqual([`country accepts at most ${MAX_COUNTRIES} values`]);
   });
 
   it.each([

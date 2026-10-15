@@ -118,6 +118,27 @@ describe('AirportsRepository (seeded PostGIS)', () => {
     it('returns everything for the whole world', async () => {
       expect((await repo.search(page({ bbox: [-180, -90, 180, 90] }))).total).toBe(4187);
     });
+
+    it('measures distance from the box midpoint and sorts by it, matching an SQL oracle', async () => {
+      // LONDON_BOX midpoint is (0, 51.5); the oracle computes ST_Distance independently.
+      const oracle = await ds.query<{ icao_code: string; distance_m: number }[]>(
+        `SELECT icao_code,
+                ST_Distance(geog, ST_SetSRID(ST_MakePoint(0, 51.5), 4326)::geography) AS distance_m
+           FROM airports
+          WHERE ST_X(geog::geometry) BETWEEN -1 AND 1 AND ST_Y(geog::geometry) BETWEEN 51 AND 52
+          ORDER BY distance_m, icao_code`,
+      );
+      const { rows } = await repo.search(page({ bbox: LONDON_BOX, sort: 'distance' }));
+
+      expect(rows.map((r) => r.icao_code)).toEqual(oracle.map((o) => o.icao_code));
+      rows.forEach((r, i) => expect(r.distance_m).toBeCloseTo(oracle[i]!.distance_m, 3));
+    });
+
+    it('returns a distance on every row of a bbox search, whatever the sort', async () => {
+      const { rows, total } = await repo.search(page({ bbox: LONDON_BOX, sort: 'name' }));
+      expect(rows).toHaveLength(total);
+      expect(rows.every((r) => typeof r.distance_m === 'number')).toBe(true);
+    });
   });
 
   describe('polygon (within)', () => {

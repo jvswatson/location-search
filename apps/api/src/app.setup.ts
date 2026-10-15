@@ -1,3 +1,4 @@
+import { MAX_REQUEST_URL_LENGTH } from '@location-search/shared';
 import type { INestApplication } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { NestExpressApplication } from '@nestjs/platform-express';
@@ -5,6 +6,7 @@ import { DocumentBuilder, type OpenAPIObject, SwaggerModule } from '@nestjs/swag
 import { Logger } from 'nestjs-pino';
 import { API_PREFIX } from './app.module.js';
 import { HttpExceptionFilter } from './common/http-exception.filter.js';
+import { rejectLongUrls } from './common/url-length.middleware.js';
 import { createValidationPipe } from './common/validation.js';
 import type { AppEnv } from './config/env.validation.js';
 
@@ -31,6 +33,8 @@ export function configureApp(app: NestExpressApplication): NestExpressApplicatio
   const config = app.get<ConfigService<AppEnv, true>>(ConfigService);
 
   app.useLogger(app.get(Logger));
+  // First, so an oversize URL is refused before any other work (see url-length.middleware.ts).
+  app.use(rejectLongUrls(MAX_REQUEST_URL_LENGTH));
   app.set('trust proxy', parseTrustProxy(config.get('TRUST_PROXY', { infer: true })));
   app.disable('x-powered-by');
   if (config.get('NODE_ENV', { infer: true }) === 'development') app.enableCors();

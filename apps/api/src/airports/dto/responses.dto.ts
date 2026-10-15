@@ -6,6 +6,7 @@ import type {
   ErrorResponse,
   HealthResponse,
   NearestResponse,
+  GeoPoint,
   PageMeta,
   Paginated,
   PointsResponse,
@@ -34,11 +35,21 @@ export class AirportPointDoc implements AirportPointDto {
   @ApiProperty() lng: number;
 }
 
+export class GeoPointDoc implements GeoPoint {
+  @ApiProperty() lat: number;
+  @ApiProperty() lng: number;
+}
+
 export class PageMetaDoc implements PageMeta {
   @ApiProperty() total: number;
   @ApiProperty() page: number;
   @ApiProperty() limit: number;
   @ApiProperty() pageCount: number;
+  @ApiPropertyOptional({
+    type: GeoPointDoc,
+    description: 'Point distanceMi is measured from: the radius center or the bbox midpoint.',
+  })
+  center?: GeoPointDoc;
 }
 
 export class PaginatedAirportsDoc implements Paginated<AirportDto> {

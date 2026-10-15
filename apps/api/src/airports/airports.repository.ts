@@ -5,7 +5,11 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import type { DataSource } from 'typeorm';
 import { SqlParams } from '../common/sql-params.js';
 import { bboxCoveringCircle } from '../geo/coordinates.js';
-import type { FilterCriteria, SearchCriteria } from './search/search-criteria.js';
+import {
+  type FilterCriteria,
+  referencePoint,
+  type SearchCriteria,
+} from './search/search-criteria.js';
 import { SEARCH_STRATEGY, type SearchStrategy } from './search/search-strategy.js';
 
 /** Raw row shape shared by every airport-returning query. */
@@ -58,8 +62,15 @@ export class AirportsRepository {
     const where = this.where(c, params);
     const filterValues = [...params.values];
 
-    const select = where.centerSql
-      ? `${AIRPORT_COLUMNS}, ST_Distance(a.geog, ${where.centerSql}) AS distance_m`
+    // Distances are measured from the radius center (already bound by the WHERE) or, for a bbox,
+    // from its midpoint. The midpoint is bound only now, after `filterValues` was captured, because
+    // the count query must not receive a parameter its SQL never references.
+    const reference = referencePoint(c);
+    const referenceSql =
+      where.centerSql ??
+      (reference ? geographyPoint(params, reference.lng, reference.lat) : undefined);
+    const select = referenceSql
+      ? `${AIRPORT_COLUMNS}, ST_Distance(a.geog, ${referenceSql}) AS distance_m`
       : AIRPORT_COLUMNS;
     const limit = params.add(c.limit);
     const offset = params.add((c.page - 1) * c.limit);

@@ -15,11 +15,14 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { type AirportRow, AirportsRepository, type PointRow } from './airports.repository.js';
 import {
   type FilterInput,
+  referencePoint,
   type Resolved,
   resolveFilters,
   resolveSearch,
   type SearchInput,
 } from './search/search-criteria.js';
+
+const round5 = (deg: number): number => Math.round(deg * 1e5) / 1e5;
 
 /** Miles rounded to 0.1, the contract's precision for every distance. */
 export const roundMiles = (meters: number): number => Math.round(metersToMiles(meters) * 10) / 10;
@@ -59,15 +62,15 @@ export class AirportsService {
   async search(input: SearchInput): Promise<Paginated<AirportDto>> {
     const criteria = orBadRequest(resolveSearch(input));
     const { rows, total } = await this.repo.search(criteria);
-    return {
-      data: rows.map(toAirportDto),
-      meta: {
-        total,
-        page: criteria.page,
-        limit: criteria.limit,
-        pageCount: Math.ceil(total / criteria.limit),
-      },
+    const meta: Paginated<AirportDto>['meta'] = {
+      total,
+      page: criteria.page,
+      limit: criteria.limit,
+      pageCount: Math.ceil(total / criteria.limit),
     };
+    const center = referencePoint(criteria);
+    if (center) meta.center = { lat: round5(center.lat), lng: round5(center.lng) };
+    return { data: rows.map(toAirportDto), meta };
   }
 
   async points(input: FilterInput): Promise<PointsResponse> {
