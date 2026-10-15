@@ -219,6 +219,9 @@
   },
   "active": "ae598512f8c3a05c",
   "lastOpenFiles": [
+    "apps/web/test-results/map-rectangle-switching-mo-1cc88-r-area-remove-the-rectangle-desktop/error-context.md",
+    "apps/web/test-results/map-rectangle-switching-mo-1cc88-r-area-remove-the-rectangle-desktop/test-failed-1.png",
+    "apps/web/test-results/map-rectangle-switching-mo-1cc88-r-area-remove-the-rectangle-desktop",
     "apps/web/e2e/map-rectangle.spec.ts",
     "apps/web/src/lib/geo.rect.test.ts",
     "apps/web/src/components/AreaControls.test.tsx",

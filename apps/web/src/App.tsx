@@ -23,6 +23,8 @@ import {
   effectiveSort,
   hasArea,
   isFilterActive,
+  nonAreaFilterKey,
+  type QueryState,
   toAirportParams,
   toFilterParams,
 } from './state/queryState';
@@ -47,6 +49,10 @@ export function App() {
   // A rectangle restored from the URL is framed once on load; one the user just drew is not.
   const [restoredBbox] = useState(() => state.bbox);
   const [drawError, setDrawError] = useState<string | null>(null);
+  // Clearing an area (or switching modes) must not move the map. Remember the other filters at that
+  // moment and skip framing pins until they change: a new search still frames its results.
+  const [noPinFitFor, setNoPinFitFor] = useState<string | null>(null);
+  const settledFilters = nonAreaFilterKey(queryState);
   const center = state.center;
   const bbox = state.bbox;
   const fit = useMemo<FitTarget>(() => {
@@ -62,10 +68,29 @@ export function App() {
         bounds: circleBounds(center, state.radiusMi),
       };
     }
-    return { key: `pins:${points.dataUpdatedAt}:${queryActive}`, bounds: pointsBounds(pins) };
+    return {
+      key: `pins:${points.dataUpdatedAt}:${queryActive}`,
+      bounds: noPinFitFor === settledFilters ? null : pointsBounds(pins),
+    };
     // The circle bounds use the radius at the moment the key changes; radius alone must not refit.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bbox, restoredBbox, center, fitNonce, points.dataUpdatedAt, queryActive, pins]);
+  }, [
+    bbox,
+    restoredBbox,
+    center,
+    fitNonce,
+    points.dataUpdatedAt,
+    queryActive,
+    pins,
+    noPinFitFor,
+    settledFilters,
+  ]);
+
+  const clearArea = (patch: Partial<Pick<QueryState, 'areaMode'>> = {}) => {
+    setDrawError(null);
+    setNoPinFitFor(settledFilters);
+    update({ ...patch, center: null, bbox: null });
+  };
 
   const onCenterChange = useCallback(
     (c: LatLng) => {
@@ -76,10 +101,7 @@ export function App() {
   const onRadiusDrag = useCallback((radiusMi: number) => update({ radiusMi }), [update]);
   const onBboxChange = useCallback((b: BBox) => update({ bbox: b }), [update]);
   // Switching modes clears the current area: only one area applies at a time.
-  const onModeChange = (areaMode: AreaMode) => {
-    setDrawError(null);
-    update({ areaMode, center: null, bbox: null });
-  };
+  const onModeChange = (areaMode: AreaMode) => clearArea({ areaMode });
 
   const onSort = (field: SortField) => {
     const current = effectiveSort(state);
@@ -122,10 +144,7 @@ export function App() {
               setFitNonce((n) => n + 1);
             }}
             hasArea={hasArea(state)}
-            onClear={() => {
-              setDrawError(null);
-              update({ center: null, bbox: null });
-            }}
+            onClear={() => clearArea()}
           />
           <div className="h-[55vh] lg:h-[calc(100vh-13rem)]">
             <AirportMap

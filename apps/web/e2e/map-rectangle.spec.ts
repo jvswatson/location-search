@@ -58,11 +58,35 @@ test('Escape cancels a half-drawn rectangle', async ({ page }) => {
   await expect(map(page)).not.toHaveAttribute('data-bbox', /.*/);
 });
 
+/**
+ * Where the map is looking: the tile zoom level (from the /z/x/y tile URLs) plus the map pane's
+ * offset, which changes on any pan or refit even when the zoom level happens to stay the same.
+ */
+const mapView = (page: Page) =>
+  page.evaluate(() => ({
+    zoom: [
+      ...new Set(
+        [...document.querySelectorAll<HTMLImageElement>('.leaflet-tile-container img')].map((img) =>
+          img.src.split('/').at(-3),
+        ),
+      ),
+    ],
+    pane: (document.querySelector('.leaflet-map-pane') as HTMLElement | null)?.style.transform,
+  }));
+
 test('switching modes and Clear area remove the rectangle', async ({ page }) => {
   await openApp(page, '?bbox=-1,51,1,52');
+  await expect(map(page)).toHaveAttribute('data-pin-count', '15');
+  await expect.poll(async () => (await mapView(page)).zoom).toHaveLength(1);
+  const viewBefore = await mapView(page);
+
   await page.getByRole('button', { name: 'Clear area' }).click();
   await expect(map(page)).not.toHaveAttribute('data-bbox', /.*/);
   await expect(page.getByTestId('map-prompt')).toBeVisible();
+  await expect(map(page)).toHaveAttribute('data-pin-count', '0');
+  // Clearing must leave the view where it was (it used to zoom to the old box's pins).
+  await page.waitForTimeout(500);
+  expect(await mapView(page)).toEqual(viewBefore);
 
   await page.goto('/?bbox=-1,51,1,52');
   await page.getByRole('radio', { name: 'Radius' }).click();

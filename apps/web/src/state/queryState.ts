@@ -45,6 +45,16 @@ export const initialState: QueryState = {
 /** True when the search has an area (a radius center or a rectangle) to measure distance from. */
 export const hasArea = (s: QueryState): boolean => s.center !== null || s.bbox !== null;
 
+/** Identity of the filters other than the map area (text, countries, altitude, IATA). */
+export const nonAreaFilterKey = (s: QueryState): string =>
+  JSON.stringify([
+    s.q.trim(),
+    s.countries,
+    s.minAltitudeFt ?? null,
+    s.maxAltitudeFt ?? null,
+    s.hasIata,
+  ]);
+
 /** True when any filter narrows the result set (page, sort, mode and radius alone do not). */
 export function isFilterActive(s: QueryState): boolean {
   return (

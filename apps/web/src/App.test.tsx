@@ -449,6 +449,100 @@ describe('rectangle mode', () => {
   });
 });
 
+describe('clearing never moves the map', () => {
+  /** Pins for any area query (so there are pins to clear), none otherwise; q adds its own pins. */
+  const areaApi = () =>
+    mockApi({
+      points: (url) => {
+        if (url.searchParams.has('q')) {
+          return { data: [{ icaoCode: 'Q001', lat: 10, lng: 10 }], total: 1 };
+        }
+        const hasArea = url.searchParams.has('bbox') || url.searchParams.has('lat');
+        return hasArea
+          ? {
+              data: [
+                { icaoCode: 'K001', lat: 51.2, lng: -0.5 },
+                { icaoCode: 'K002', lat: 51.8, lng: 0.5 },
+              ],
+              total: 2,
+            }
+          : { data: [], total: 0 };
+      },
+    });
+
+  const settledWithoutArea = async () => {
+    await waitFor(() =>
+      expect(screen.getByTestId('airport-map')).toHaveAttribute('data-pin-count', '0'),
+    );
+    expect(screen.getByTestId('map-prompt')).toBeInTheDocument();
+  };
+
+  it('Clear area after a rectangle leaves the view alone', async () => {
+    window.history.replaceState(null, '', '/?bbox=-1,51,1,52');
+    areaApi();
+    renderApp();
+    await waitFor(() =>
+      expect(screen.getByTestId('airport-map')).toHaveAttribute('data-pin-count', '2'),
+    );
+    fitBounds.mockClear();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Clear area' }));
+    await settledWithoutArea();
+    expect(fitBounds).not.toHaveBeenCalled();
+  });
+
+  it('Clear area after a radius leaves the view alone', async () => {
+    areaApi();
+    renderApp();
+    await screen.findAllByTestId('airport-row');
+    await clickMap(51.5, 0);
+    await waitFor(() =>
+      expect(screen.getByTestId('airport-map')).toHaveAttribute('data-pin-count', '2'),
+    );
+    fitBounds.mockClear();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Clear area' }));
+    await settledWithoutArea();
+    expect(fitBounds).not.toHaveBeenCalled();
+  });
+
+  it('switching modes leaves the view alone', async () => {
+    window.history.replaceState(null, '', '/?bbox=-1,51,1,52');
+    areaApi();
+    renderApp();
+    await waitFor(() =>
+      expect(screen.getByTestId('airport-map')).toHaveAttribute('data-pin-count', '2'),
+    );
+    fitBounds.mockClear();
+
+    await userEvent.click(screen.getByRole('radio', { name: 'Radius' }));
+    await settledWithoutArea();
+    expect(fitBounds).not.toHaveBeenCalled();
+  });
+
+  it('still frames the pins of a new text search after clearing', async () => {
+    window.history.replaceState(null, '', '/?bbox=-1,51,1,52');
+    areaApi();
+    renderApp();
+    await waitFor(() =>
+      expect(screen.getByTestId('airport-map')).toHaveAttribute('data-pin-count', '2'),
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Clear area' }));
+    await settledWithoutArea();
+    fitBounds.mockClear();
+
+    await userEvent.type(screen.getByLabelText('Search airports'), 'abc');
+    await waitFor(() => expect(fitBounds).toHaveBeenCalled());
+    expect(fitBounds).toHaveBeenLastCalledWith(
+      [
+        [10, 10],
+        [10, 10],
+      ],
+      expect.anything(),
+    );
+  });
+});
+
 describe('framing on load', () => {
   afterEach(() => {
     mapSize.x = 800;
