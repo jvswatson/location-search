@@ -21,8 +21,6 @@ function setup() {
     findByIcao: vi.fn(),
     nearest: vi.fn(),
     distance: vi.fn(),
-    polygonInvalidReason: vi.fn(),
-    within: vi.fn(),
     countries: vi.fn(),
   };
   return { repo, service: new AirportsService(repo as unknown as AirportsRepository) };
@@ -155,25 +153,14 @@ describe('AirportsService', () => {
     await expect(service.distance('ZZZZ', 'ZZZZ')).rejects.toThrow('Airport not found: ZZZZ');
   });
 
-  it('within forwards only type and coordinates, and 400s on invalid topology', async () => {
+  it('reports the polygon centroid as meta.center and defaults to distance', async () => {
     const { repo, service } = setup();
-    const coordinates: [number, number][][] = [
-      [
-        [0, 0],
-        [1, 0],
-        [1, 1],
-        [0, 0],
-      ],
-    ];
-    const body = { type: 'Polygon' as const, coordinates, extra: 'dropped' };
-    repo.polygonInvalidReason.mockResolvedValue(null);
-    repo.within.mockResolvedValue([row('AAAA')]);
-
-    expect(await service.within(body)).toMatchObject({ total: 1, data: [{ icaoCode: 'AAAA' }] });
-    expect(repo.within).toHaveBeenCalledWith(JSON.stringify({ type: 'Polygon', coordinates }));
-
-    repo.polygonInvalidReason.mockResolvedValue('Self-intersection[0.5 0.5]');
-    await expect(service.within(body)).rejects.toThrow(BadRequestException);
+    repo.search.mockResolvedValue({ rows: [], total: 0 });
+    const result = await service.search({ polygon: '-10,-10;10,-10;10,10;-10,10' });
+    expect(result.meta.center).toEqual({ lat: 0, lng: 0 });
+    expect(repo.search).toHaveBeenCalledWith(
+      expect.objectContaining({ sort: 'distance', polygon: expect.any(Array) }),
+    );
   });
 
   it('countries delegates to the repository', async () => {

@@ -3,13 +3,14 @@ import { BadRequestException, type Type } from '@nestjs/common';
 import {
   MAX_COUNTRIES,
   MAX_PAGE_LIMIT,
+  MAX_POLYGON_POINTS,
   MAX_QUERY_LENGTH,
   MAX_RADIUS_MI,
   MIN_RADIUS_MI,
 } from '@location-search/shared';
 import { createValidationPipe } from '../../common/validation.js';
 import { AirportFiltersQueryDto, AirportSearchQueryDto } from './airport-query.dto.js';
-import { DistanceQueryDto, IcaoParamDto, NearestQueryDto, WithinRequestDto } from './params.dto.js';
+import { DistanceQueryDto, IcaoParamDto, NearestQueryDto } from './params.dto.js';
 
 const pipe = createValidationPipe();
 
@@ -74,6 +75,20 @@ describe('AirportSearchQueryDto', () => {
     });
   });
 
+  it(`accepts a polygon of up to ${MAX_POLYGON_POINTS} points and rejects more`, async () => {
+    const ngon = (n: number) =>
+      Array.from({ length: n }, (_, i) => {
+        const t = (2 * Math.PI * i) / n;
+        return `${(10 * Math.cos(t)).toFixed(5)},${(10 * Math.sin(t)).toFixed(5)}`;
+      }).join(';');
+    const ok = await validate(AirportSearchQueryDto, { polygon: ngon(MAX_POLYGON_POINTS) });
+    expect(ok.polygon).toBe(ngon(MAX_POLYGON_POINTS));
+    const { message } = await messages(AirportSearchQueryDto, {
+      polygon: ngon(MAX_POLYGON_POINTS + 1),
+    });
+    expect(message).toEqual([`polygon accepts at most ${MAX_POLYGON_POINTS} points`]);
+  });
+
   it('accepts repeated country values', async () => {
     const dto = await validate(AirportSearchQueryDto, { country: ['France', ' Spain '] });
     expect(dto.country).toEqual(['France', 'Spain']);
@@ -109,6 +124,11 @@ describe('AirportSearchQueryDto', () => {
     [{ limit: String(MAX_PAGE_LIMIT + 1) }, /limit must not be greater than/],
     [{ format: 'xml' }, /format must be one of/],
     [{ country: [''] }, /country should not be empty/],
+    [{ polygon: '0,0;10,10;10,0;0,10' }, /polygon edges must not cross or touch each other/],
+    [{ polygon: '170,0;-170,0;-170,10;170,10' }, /must not cross the antimeridian/],
+    [{ polygon: '0,0;1,1' }, /at least 3 distinct points/],
+    [{ polygon: '0,0;1,x;1,1' }, /point 2 must be "lng,lat"/],
+    [{ polygon: ['0,0;1,0;1,1', '0,0;1,0;1,1'] }, /polygon must be a single string/],
   ])('rejects %j', async (query, pattern) => {
     const { message } = await messages(AirportSearchQueryDto, query);
     expect(message.join('\n')).toMatch(pattern);
@@ -167,34 +187,5 @@ describe('IcaoParamDto / DistanceQueryDto / NearestQueryDto', () => {
     expect((await messages(NearestQueryDto, { k: '51' })).message[0]).toMatch(
       /k must not be greater/,
     );
-  });
-});
-
-describe('WithinRequestDto', () => {
-  const ring = [
-    [-1, 51],
-    [1, 51],
-    [1, 52],
-    [-1, 52],
-    [-1, 51],
-  ];
-
-  it('accepts a GeoJSON polygon', async () => {
-    const dto = await validate(WithinRequestDto, { type: 'Polygon', coordinates: [ring] }, 'body');
-    expect(dto.coordinates).toEqual([ring]);
-  });
-
-  it('rejects other geometry types, open rings and foreign members', async () => {
-    expect(
-      (await messages(WithinRequestDto, { type: 'Point', coordinates: [ring] }, 'body')).message,
-    ).toEqual(["type must be 'Polygon'"]);
-    const open = { type: 'Polygon', coordinates: [ring.slice(0, 4).concat([[0, 51.5]])] };
-    expect((await messages(WithinRequestDto, open, 'body')).message).toEqual([
-      'exterior ring must be closed (first and last positions equal)',
-    ]);
-    const extra = { type: 'Polygon', coordinates: [ring], crs: {} };
-    expect((await messages(WithinRequestDto, extra, 'body')).message).toEqual([
-      'property crs should not exist',
-    ]);
   });
 });

@@ -63,14 +63,14 @@ describe('query plans', () => {
   });
 
   it('polygon search uses the GIST index', async () => {
-    const square = [
-      [-1, 51],
-      [1, 51],
-      [1, 52],
-      [-1, 52],
-      [-1, 51],
-    ];
-    await explaining.within(JSON.stringify({ type: 'Polygon', coordinates: [square] }));
+    await explaining.points({
+      polygon: [
+        [-1, 51],
+        [1, 51],
+        [1, 52],
+        [-1, 52],
+      ],
+    });
     expect(plans[0]).toContain('airports_geog_gist');
   });
 

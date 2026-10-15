@@ -44,13 +44,13 @@ describe('health, docs and static web (e2e)', () => {
         '/api/v1/airports',
         '/api/v1/airports/points',
         '/api/v1/airports/distance',
-        '/api/v1/airports/within',
         '/api/v1/airports/{icao}',
         '/api/v1/airports/{icao}/nearest',
         '/api/v1/countries',
         '/api/v1/health',
       ]),
     );
+    expect(paths).not.toContain('/api/v1/airports/within');
     const params = json.body.paths['/api/v1/airports'].get.parameters.map(
       (p: { name: string }) => p.name,
     );
@@ -59,6 +59,7 @@ describe('health, docs and static web (e2e)', () => {
         'q',
         'country',
         'bbox',
+        'polygon',
         'radiusMi',
         'sort',
         'page',
