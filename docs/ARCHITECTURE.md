@@ -308,9 +308,14 @@ erDiagram
 | `airports_name_trgm`, `airports_city_trgm` | GIN `gin_trgm_ops` | typo-tolerant `<%` matching                                                |
 | `airports_country`, `airports_altitude_ft` | btree              | country and altitude filters                                               |
 
-Index use is asserted by `apps/api/test/integration/airports.query-plans.int-spec.ts`.
+`apps/api/test/integration/airports.query-plans.int-spec.ts` asserts that the GIST (radius, bbox,
+polygon, KNN), full-text and trigram indexes are used (with sequential scans disabled, since the
+table is small enough that the planner would often skip them) and that combined filters avoid a
+sequential scan. The btree indexes are not asserted individually.
 
 ## Where each concern lives
+
+Short paths are relative to `apps/api/src`.
 
 | Concern                                                                             | Enforced in                                                                                                                                      |
 | ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -318,7 +323,7 @@ Index use is asserted by `apps/api/test/integration/airports.query-plans.int-spe
 | Cross-field rules (lat/lng/radius together, one area only, sort needs q or an area) | `search/search-criteria.ts`                                                                                                                      |
 | SQL injection safety                                                                | `AirportsRepository` + `SqlParams` (bound parameters only); `tsquery.ts` sanitizes text                                                          |
 | Rate limiting                                                                       | `ThrottlerGuard`, keyed on client IP across routes (`TRUST_PROXY` decides which hops to trust)                                                   |
-| Request size (50 countries, 100-char `q`, 8,000-char URL)                           | DTO validation, `common/url-length.middleware.ts` (414) and the same checks in the web client; `common/request-size.spec.ts` pins the worst case |
+| Request size (50 countries, 100-char `q`, 100 polygon points, 8,000-char URL)       | DTO validation, `common/url-length.middleware.ts` (414) and the same checks in the web client; `common/request-size.spec.ts` pins the worst case |
 | Error shape                                                                         | `HttpExceptionFilter`                                                                                                                            |
 | Units                                                                               | `packages/shared/src/units.ts`, applied in the service                                                                                           |
 | Production configuration safety                                                     | `config/env.validation.ts` (password required in production)                                                                                     |

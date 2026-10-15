@@ -56,7 +56,7 @@ pnpm test:e2e
   are not. The map toolbar must not change height while drawing (it would move the map under
   the cursor). `POST /airports/within` was removed.
 - Request limits (shared constants, enforced in API **and** UI): 50 `country` values, 100-char
-  `q`, 100 polygon points, 8,000-char request URL (414). `src/common/request-size.spec.ts` pins the worst-case URL
+  `q`, 100 polygon points, 8,000-char request URL (414). `apps/api/src/common/request-size.spec.ts` pins the worst-case URL
   built from real data (4,793 chars with a 100-point polygon) below 75% of the cap; keep it
   passing when adding parameters.
 - Search: text + filters + map area all combine. `SearchStrategy` seam in the service layer
@@ -76,7 +76,8 @@ pnpm test:e2e
   `docs/rulesets/protect-main.json` (see docs/CI.md). Renaming a CI
   job means updating the ruleset's required checks too.
 - Coverage target ~80% is reported, not a CI gate. Don't write brittle tests just to hit it.
-- Tests: unit `src/**/*.spec.ts` (api, shared) / `src/**/*.test.tsx` (web); integration
+- Tests: unit `src/**/*.spec.ts` (api, shared; api also `test/scripts/**/*.spec.ts`) /
+  `src/**/*.test.{ts,tsx}` (web); integration
   `test/integration/**/*.int-spec.ts`; e2e `test/e2e/**/*.e2e-spec.ts`; Playwright `apps/web/e2e/`.
 - **DB tests must be order-independent.** Integration/e2e configs shuffle file and test order on
   every run and run files in parallel. Each suite gets its own database via
