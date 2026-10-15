@@ -5,12 +5,20 @@ import {
   CircleMarker,
   MapContainer,
   Marker,
+  Polygon,
+  Polyline,
   Rectangle,
   TileLayer,
   useMap,
   useMapEvents,
 } from 'react-leaflet';
-import { milesToMeters, type AirportPointDto, type GeoPoint } from '@location-search/shared';
+import {
+  MIN_POLYGON_POINTS,
+  milesToMeters,
+  type AirportPointDto,
+  type GeoPoint,
+  type LngLat,
+} from '@location-search/shared';
 import {
   bboxBounds,
   handlePosition,
@@ -35,7 +43,10 @@ interface Props {
   center: LatLng | null;
   radiusMi: number;
   bbox: BBox | null;
-  /** Where the API measures distances from (meta.center); marked with a crosshair for rectangles. */
+  polygon: LngLat[] | null;
+  /** Polygon mode: the outline being drawn (empty when not drawing). */
+  polygonDraft: LngLat[];
+  /** Where the API measures distances from (meta.center); crosshair for rectangles and polygons. */
   referenceCenter?: GeoPoint;
   pins: AirportPointDto[];
   fit: FitTarget;
@@ -43,6 +54,12 @@ interface Props {
   /** Fires continuously while the handle is dragged (already rounded and clamped). */
   onRadiusDrag: (radiusMi: number) => void;
   onBboxChange: (bbox: BBox) => void;
+  /** Polygon mode: a click on the map (raw Leaflet coordinates; the app validates and adds it). */
+  onPolygonPoint: (point: LatLng) => void;
+  /** Polygon mode: double-click, a click on the first point, or Enter. */
+  onPolygonFinish: () => void;
+  /** Polygon mode: Escape. */
+  onPolygonCancel: () => void;
   /** A drawing problem to show (null clears it), e.g. a rectangle across the antimeridian. */
   onDrawError: (message: string | null) => void;
   children?: ReactNode;
@@ -146,6 +163,97 @@ function RectangleDrawer({
   );
 }
 
+const toLatLng = ([lng, lat]: LngLat): [number, number] => [lat, lng];
+
+/** How close (in screen pixels) a click must be to the first point to close the outline. */
+const CLOSE_RADIUS_PX = 10;
+
+/**
+ * Polygon mode: clicks add points, double-click (or a click on the first point, or Enter) finishes,
+ * Escape cancels. Validation lives in the app (lib/polygonDraft); this only reports intent and
+ * draws the outline so far, with a dashed segment following the cursor. Double-click zoom is off.
+ */
+function PolygonDrawer({
+  draft,
+  onPoint,
+  onFinish,
+  onCancel,
+}: {
+  draft: LngLat[];
+  onPoint: (point: LatLng) => void;
+  onFinish: () => void;
+  onCancel: () => void;
+}) {
+  const map = useMap();
+  const [cursor, setCursor] = useState<LatLng | null>(null);
+
+  useEffect(() => {
+    map.doubleClickZoom.disable();
+    return () => {
+      map.doubleClickZoom.enable();
+    };
+  }, [map]);
+
+  useEffect(() => {
+    if (draft.length === 0) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onCancel();
+      else if (e.key === 'Enter') onFinish();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [draft.length, onCancel, onFinish]);
+
+  useMapEvents({
+    click: (e: LeafletMouseEvent) => {
+      // A click on (or right next to) the first point closes the outline. Checked here in screen
+      // pixels rather than with a click handler on the marker: with the canvas renderer the map,
+      // not the marker, receives the click.
+      const first = draft[0];
+      if (first && draft.length >= MIN_POLYGON_POINTS) {
+        const a = map.latLngToContainerPoint([first[1], first[0]]);
+        const b = map.latLngToContainerPoint(e.latlng);
+        if (Math.hypot(a.x - b.x, a.y - b.y) <= CLOSE_RADIUS_PX) {
+          onFinish();
+          return;
+        }
+      }
+      onPoint({ lat: e.latlng.lat, lng: e.latlng.lng });
+    },
+    dblclick: () => onFinish(),
+    mousemove: (e: LeafletMouseEvent) => setCursor({ lat: e.latlng.lat, lng: e.latlng.lng }),
+  });
+
+  const first = draft[0];
+  const last = draft.at(-1);
+  if (!first || !last) return null;
+  return (
+    <>
+      <Polyline positions={draft.map(toLatLng)} interactive={false} pathOptions={AREA_STYLE} />
+      {cursor && (
+        <Polyline
+          positions={[toLatLng(last), [cursor.lat, cursor.lng]]}
+          interactive={false}
+          pathOptions={{ ...AREA_STYLE, dashArray: '6 4' }}
+        />
+      )}
+      {/* Marks the first point; clicks near it close the outline (see the click handler). */}
+      <CircleMarker
+        center={toLatLng(first)}
+        radius={CLOSE_RADIUS_PX - 3}
+        interactive={false}
+        pathOptions={{
+          className: 'outline-first-point',
+          color: '#0369a1',
+          weight: 2,
+          fillColor: '#ffffff',
+          fillOpacity: 1,
+        }}
+      />
+    </>
+  );
+}
+
 function FitController({ fit }: { fit: FitTarget }) {
   const map = useMap();
   const latest = useRef(fit.bounds);
@@ -234,16 +342,22 @@ export function AirportMap({
   center,
   radiusMi,
   bbox,
+  polygon,
+  polygonDraft,
   referenceCenter,
   pins,
   fit,
   onCenterChange,
   onRadiusDrag,
   onBboxChange,
+  onPolygonPoint,
+  onPolygonFinish,
+  onPolygonCancel,
   onDrawError,
   children,
 }: Props) {
-  const [drafting, setDrafting] = useState(false);
+  const [rectangleDrafting, setRectangleDrafting] = useState(false);
+  const drafting = mode === 'polygon' ? polygonDraft.length > 0 : rectangleDrafting;
   return (
     <div
       data-testid="airport-map"
@@ -251,6 +365,7 @@ export function AirportMap({
       data-mode={mode}
       data-center={center ? `${center.lat},${center.lng}` : undefined}
       data-bbox={bbox ? bbox.join(',') : undefined}
+      data-polygon={polygon ? polygon.map((p) => p.join(',')).join(';') : undefined}
       data-drafting={drafting || undefined}
       className="relative h-full min-h-72 w-full overflow-hidden rounded-md border border-slate-200"
     >
@@ -266,13 +381,20 @@ export function AirportMap({
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
           url="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
-        {mode === 'radius' ? (
-          <ClickToSetCenter onCenterChange={onCenterChange} />
-        ) : (
+        {mode === 'radius' && <ClickToSetCenter onCenterChange={onCenterChange} />}
+        {mode === 'rectangle' && (
           <RectangleDrawer
             onComplete={onBboxChange}
             onError={onDrawError}
-            onDraftingChange={setDrafting}
+            onDraftingChange={setRectangleDrafting}
+          />
+        )}
+        {mode === 'polygon' && (
+          <PolygonDrawer
+            draft={polygonDraft}
+            onPoint={onPolygonPoint}
+            onFinish={onPolygonFinish}
+            onCancel={onPolygonCancel}
           />
         )}
         <ContainerSizeWatcher />
@@ -300,7 +422,10 @@ export function AirportMap({
         {bbox && (
           <Rectangle bounds={bboxBounds(bbox)} interactive={false} pathOptions={AREA_STYLE} />
         )}
-        {mode === 'rectangle' && bbox && referenceCenter && (
+        {polygon && (
+          <Polygon positions={polygon.map(toLatLng)} interactive={false} pathOptions={AREA_STYLE} />
+        )}
+        {mode !== 'radius' && (bbox || polygon) && referenceCenter && (
           <Marker
             position={[referenceCenter.lat, referenceCenter.lng]}
             icon={crosshairIcon}
@@ -315,7 +440,9 @@ export function AirportMap({
           data-testid="draw-hint"
           className="pointer-events-none absolute top-2 left-1/2 z-[500] -translate-x-1/2 rounded-full bg-white/90 px-3 py-1 text-xs font-medium text-slate-700 shadow"
         >
-          Click the opposite corner · Esc to cancel
+          {mode === 'polygon'
+            ? 'Double-click or click the first point to finish · Esc to cancel'
+            : 'Click the opposite corner · Esc to cancel'}
         </p>
       )}
       {/* Overlays such as the start prompt would compete with the drawing hint. */}

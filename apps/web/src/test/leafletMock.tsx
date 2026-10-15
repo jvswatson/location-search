@@ -6,6 +6,7 @@ type LatLngEvent = { latlng: { lat: number; lng: number } };
 /** Callbacks captured from the lightweight react-leaflet stand-ins, so tests can drive the map. */
 export const mapHandlers: {
   click?: (e: LatLngEvent) => void;
+  dblclick?: (e: LatLngEvent) => void;
   mousemove?: (e: LatLngEvent) => void;
 } = {};
 export const fitBounds = vi.fn();
@@ -24,6 +25,11 @@ const mockMap = {
   doubleClickZoom,
   getSize: () => ({ ...mapSize }),
   getContainer: () => document.createElement('div'),
+  // A flat projection, 10 px per degree, so tests can reason about click distances in pixels.
+  latLngToContainerPoint: (ll: [number, number] | { lat: number; lng: number }) => {
+    const [lat, lng] = Array.isArray(ll) ? ll : [ll.lat, ll.lng];
+    return { x: lng * 10, y: -lat * 10 };
+  },
   invalidateSize: vi.fn(),
   on: (name: string, handler: () => void) => {
     if (!mapEventHandlers.has(name)) mapEventHandlers.set(name, new Set());
@@ -50,12 +56,37 @@ export function createReactLeafletMock() {
     useMapEvents: (handlers: typeof mapHandlers) => {
       // Replace (not merge): switching modes swaps the map's event handlers.
       delete mapHandlers.click;
+      delete mapHandlers.dblclick;
       delete mapHandlers.mousemove;
       Object.assign(mapHandlers, handlers);
       return {};
     },
-    CircleMarker: ({ center }: { center: [number, number] }) => (
-      <span data-testid="pin" data-center={center.join(',')} />
+    CircleMarker: ({
+      center,
+      pathOptions,
+    }: {
+      center: [number, number];
+      pathOptions?: { className?: string };
+    }) => (
+      <span
+        data-testid={pathOptions?.className === 'outline-first-point' ? 'first-point' : 'pin'}
+        data-center={center.join(',')}
+      />
+    ),
+    Polygon: ({ positions }: { positions: [number, number][] }) => (
+      <span data-testid="polygon" data-positions={positions.map((p) => p.join(',')).join(';')} />
+    ),
+    Polyline: ({
+      positions,
+      pathOptions,
+    }: {
+      positions: [number, number][];
+      pathOptions?: { dashArray?: string };
+    }) => (
+      <span
+        data-testid={pathOptions?.dashArray ? 'outline-cursor' : 'outline'}
+        data-positions={positions.map((p) => p.join(',')).join(';')}
+      />
     ),
     Circle: ({ center, radius }: { center: [number, number]; radius: number }) => (
       <span data-testid="circle" data-center={center.join(',')} data-radius-m={radius} />

@@ -3,6 +3,7 @@ import type { AreaMode } from '../state/queryState';
 const TEXT: Record<AreaMode, string> = {
   radius: 'Click the map or search to start filtering',
   rectangle: 'Click two corners on the map or search to start filtering',
+  polygon: 'Click points on the map to outline an area, or search to start filtering',
 };
 
 export function MapPrompt({ mode = 'radius' }: { mode?: AreaMode }) {

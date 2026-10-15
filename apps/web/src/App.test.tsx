@@ -449,6 +449,205 @@ describe('rectangle mode', () => {
   });
 });
 
+describe('polygon mode', () => {
+  const choosePolygon = () => userEvent.click(screen.getByRole('radio', { name: 'Polygon' }));
+  const dblclickMap = (lat: number, lng: number) =>
+    act(() => mapHandlers.dblclick?.({ latlng: { lat, lng } }));
+  /** A real double-click: two clicks on the same spot, then dblclick. */
+  const doubleClickMap = async (lat: number, lng: number) => {
+    await clickMap(lat, lng);
+    await clickMap(lat, lng);
+    await dblclickMap(lat, lng);
+  };
+
+  const polygonApi = () =>
+    mockApi({
+      airports: (url) =>
+        url.searchParams.has('polygon')
+          ? {
+              ...paginated([makeAirport(1, { distanceMi: 2.2 })]),
+              meta: { ...paginated([]).meta, total: 1, center: { lat: 51.3, lng: 0 } },
+            }
+          : paginated([makeAirport(1), makeAirport(2)]),
+      points: (url) =>
+        url.searchParams.has('polygon')
+          ? { data: [{ icaoCode: 'K001', lat: 51.2, lng: 0.1 }], total: 1 }
+          : { data: [], total: 0 },
+    });
+
+  it('outlines with clicks, finishes on double-click and searches the polygon', async () => {
+    const rec = polygonApi();
+    renderApp();
+    await screen.findAllByTestId('airport-row');
+    await choosePolygon();
+    expect(screen.getByTestId('map-prompt')).toHaveTextContent(
+      'Click points on the map to outline an area, or search to start filtering',
+    );
+    expect(doubleClickZoom.disable).toHaveBeenCalled();
+    fitBounds.mockClear();
+
+    await clickMap(51, -1);
+    await clickMap(51, 1);
+    expect(screen.getByTestId('draft-points')).toHaveTextContent('2 points');
+    expect(screen.getByTestId('draw-hint')).toHaveTextContent(
+      'Double-click or click the first point',
+    );
+    expect(screen.queryByTestId('map-prompt')).not.toBeInTheDocument();
+    expect(screen.getByTestId('outline')).toHaveAttribute('data-positions', '51,-1;51,1');
+    expect(rec.airports.some((u) => u.searchParams.has('polygon'))).toBe(false);
+
+    await doubleClickMap(52, 0);
+    const map = screen.getByTestId('airport-map');
+    expect(map).toHaveAttribute('data-polygon', '-1,51;1,51;0,52');
+    expect(screen.queryByTestId('outline')).not.toBeInTheDocument();
+    expect(screen.getByTestId('polygon')).toHaveAttribute('data-positions', '51,-1;51,1;52,0');
+
+    await waitFor(() =>
+      expect(params(last(rec.airports))).toMatchObject({ polygon: '-1,51;1,51;0,52' }),
+    );
+    expect(params(last(rec.points))).toEqual({ polygon: '-1,51;1,51;0,52' });
+    await waitFor(() => expect(map).toHaveAttribute('data-pin-count', '1'));
+    expect(await screen.findByText('2.2')).toBeInTheDocument();
+    expect(screen.getByTestId('search-center')).toHaveAttribute('data-position', '51.3,0');
+    expect(window.location.search).toBe('?area=polygon&polygon=-1%2C51%3B1%2C51%3B0%2C52');
+    expect(fitBounds).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    // Within 10 px of the first point (51, -1) in the mock's 10 px/degree projection.
+    ['clicking next to the first point', async () => clickMap(51.05, -1.05)],
+    ['pressing Enter', async () => userEvent.keyboard('{Enter}')],
+    [
+      'the Finish button',
+      async () => userEvent.click(screen.getByRole('button', { name: 'Finish' })),
+    ],
+  ])('finishes by %s', async (_label, finish) => {
+    polygonApi();
+    renderApp();
+    await screen.findAllByTestId('airport-row');
+    await choosePolygon();
+    await clickMap(51, -1);
+    await clickMap(51, 1);
+    await clickMap(52, 0);
+    await finish();
+    expect(screen.getByTestId('airport-map')).toHaveAttribute('data-polygon', '-1,51;1,51;0,52');
+  });
+
+  it('adds a point (does not close) for a click farther than 10 px from the first point', async () => {
+    polygonApi();
+    renderApp();
+    await screen.findAllByTestId('airport-row');
+    await choosePolygon();
+    await clickMap(51, -1);
+    await clickMap(51, 1);
+    await clickMap(52, 0);
+    await clickMap(51, -2.5); // 15 px from the first point in the mock projection
+    expect(screen.getByTestId('draft-points')).toHaveTextContent('4 points');
+    expect(screen.getByTestId('airport-map')).not.toHaveAttribute('data-polygon');
+  });
+
+  it('does not close on the first point before there are 3 points', async () => {
+    polygonApi();
+    renderApp();
+    await screen.findAllByTestId('airport-row');
+    await choosePolygon();
+    await clickMap(51, -1);
+    await clickMap(51, 1);
+    await clickMap(51.05, -1.05); // near the first point, but only the third point
+    expect(screen.getByTestId('draft-points')).toHaveTextContent('3 points');
+  });
+
+  it('blocks a self-intersecting outline with a message and keeps it for undo', async () => {
+    const rec = polygonApi();
+    renderApp();
+    await screen.findAllByTestId('airport-row');
+    await choosePolygon();
+    for (const [lat, lng] of [
+      [0, 0],
+      [10, 10],
+      [0, 10],
+      [10, 0],
+    ] as const)
+      await clickMap(lat, lng);
+    await userEvent.click(screen.getByRole('button', { name: 'Finish' }));
+
+    expect(screen.getByTestId('draw-error')).toHaveTextContent(
+      "The outline can't cross or touch itself",
+    );
+    expect(screen.getByTestId('airport-map')).not.toHaveAttribute('data-polygon');
+    expect(screen.getByTestId('draft-points')).toHaveTextContent('4 points');
+    expect(rec.airports.some((u) => u.searchParams.has('polygon'))).toBe(false);
+
+    // Undo the crossing point and finish a valid triangle.
+    await userEvent.click(screen.getByRole('button', { name: 'Undo last point' }));
+    expect(screen.queryByTestId('draw-error')).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Finish' }));
+    expect(screen.getByTestId('airport-map')).toHaveAttribute('data-polygon', '0,0;10,10;10,0');
+  });
+
+  it('refuses a point across the antimeridian without adding it', async () => {
+    polygonApi();
+    renderApp();
+    await screen.findAllByTestId('airport-row');
+    await choosePolygon();
+    await clickMap(0, 170);
+    await clickMap(10, 190);
+    expect(screen.getByTestId('draw-error')).toHaveTextContent(ANTIMERIDIAN_ERROR);
+    expect(screen.getByTestId('draft-points')).toHaveTextContent('1 point');
+  });
+
+  it('Escape and Cancel discard the outline', async () => {
+    polygonApi();
+    renderApp();
+    await screen.findAllByTestId('airport-row');
+    await choosePolygon();
+    await clickMap(51, -1);
+    await clickMap(51, 1);
+    await userEvent.keyboard('{Escape}');
+    expect(screen.queryByTestId('outline')).not.toBeInTheDocument();
+    expect(screen.getByTestId('map-prompt')).toBeInTheDocument();
+
+    await clickMap(51, -1);
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.getByTestId('draft-points')).toHaveTextContent('0 points');
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled();
+  });
+
+  it('restores a polygon from the URL and frames it once', async () => {
+    window.history.replaceState(null, '', '/?polygon=-1,51;1,51;0,52');
+    const rec = polygonApi();
+    fitBounds.mockClear();
+    renderApp();
+    expect(screen.getByTestId('airport-map')).toHaveAttribute('data-mode', 'polygon');
+    await waitFor(() =>
+      expect(params(rec.airports[0]!)).toMatchObject({ polygon: '-1,51;1,51;0,52' }),
+    );
+    expect(fitBounds).toHaveBeenCalledWith(
+      [
+        [51, -1],
+        [52, 1],
+      ],
+      expect.anything(),
+    );
+  });
+
+  it('Clear area and switching modes drop the polygon and any outline in progress', async () => {
+    window.history.replaceState(null, '', '/?polygon=-1,51;1,51;0,52');
+    polygonApi();
+    renderApp();
+    await screen.findAllByTestId('airport-row');
+    await clickMap(40, 40); // start a new outline while the old polygon is shown
+    await userEvent.click(screen.getByRole('button', { name: 'Clear area' }));
+    expect(screen.getByTestId('airport-map')).not.toHaveAttribute('data-polygon');
+    expect(screen.queryByTestId('outline')).not.toBeInTheDocument();
+
+    await clickMap(40, 40);
+    await userEvent.click(screen.getByRole('radio', { name: 'Rectangle' }));
+    expect(screen.queryByTestId('outline')).not.toBeInTheDocument();
+    expect(window.location.search).toBe('?area=rectangle');
+  });
+});
+
 describe('clearing never moves the map', () => {
   /** Pins for any area query (so there are pins to clear), none otherwise; q adds its own pins. */
   const areaApi = () =>

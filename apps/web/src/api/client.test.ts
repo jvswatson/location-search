@@ -29,6 +29,18 @@ describe('airportsQuery / pointsQuery', () => {
     );
   });
 
+  it('serializes a polygon as lng,lat;lng,lat;…', () => {
+    expect(
+      airportsQuery({
+        polygon: [
+          [-1, 51],
+          [1, 51],
+          [0.5, 52],
+        ],
+      }),
+    ).toBe('polygon=-1%2C51%3B1%2C51%3B0.5%2C52');
+  });
+
   it('drops sort, order, page and limit for points', () => {
     expect(
       pointsQuery({ q: 'x', sort: 'name', order: 'asc', page: 3, limit: 25, country: ['A'] }),

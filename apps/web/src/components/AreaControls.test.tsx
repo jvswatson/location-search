@@ -26,6 +26,50 @@ const setup = ({
   return { onModeChange, onRadiusChange, onClear };
 };
 
+describe('AreaControls (polygon mode)', () => {
+  const draw = (draftPoints: number) => {
+    const handlers = { onFinishPolygon: vi.fn(), onUndoPoint: vi.fn(), onCancelPolygon: vi.fn() };
+    render(
+      <AreaControls
+        mode="polygon"
+        onModeChange={vi.fn()}
+        radiusMi={50}
+        onRadiusChange={vi.fn()}
+        hasArea={false}
+        onClear={vi.fn()}
+        draftPoints={draftPoints}
+        {...handlers}
+      />,
+    );
+    return handlers;
+  };
+
+  it('shows the same controls before the first point, all disabled', () => {
+    // Constant layout: the toolbar must not change height when drawing starts (the map would move).
+    draw(0);
+    expect(screen.getByTestId('draft-points')).toHaveTextContent('0 points');
+    for (const name of ['Finish', 'Undo last point', 'Cancel']) {
+      expect(screen.getByRole('button', { name })).toBeDisabled();
+    }
+  });
+
+  it('offers Finish only from 3 points, plus Undo and Cancel', async () => {
+    draw(2);
+    expect(screen.getByTestId('draft-points')).toHaveTextContent('2 points');
+    expect(screen.getByRole('button', { name: 'Finish' })).toBeDisabled();
+  });
+
+  it('reports Finish, Undo last point and Cancel', async () => {
+    const h = draw(3);
+    await userEvent.click(screen.getByRole('button', { name: 'Finish' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Undo last point' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(h.onFinishPolygon).toHaveBeenCalledOnce();
+    expect(h.onUndoPoint).toHaveBeenCalledOnce();
+    expect(h.onCancelPolygon).toHaveBeenCalledOnce();
+  });
+});
+
 describe('AreaControls', () => {
   describe('mode switch', () => {
     it('shows the current mode as the checked radio', () => {
