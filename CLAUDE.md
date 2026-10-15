@@ -58,7 +58,8 @@ pnpm test:e2e
 - Husky: pre-commit = lint-staged; pre-push = typecheck + unit tests; commit-msg = commitlint.
 - **`main` is protected** (ruleset `protect-main`, no bypass, applies to admins too): never commit
   to or push `main` directly. Work on a branch and open a PR; it merges only when all five CI
-  checks pass. Definition: `.github/rulesets/protect-main.json` (see docs/CI.md). Renaming a CI
+  checks pass. Reference copy (not enforced; GitHub holds the live ruleset):
+  `docs/rulesets/protect-main.json` (see docs/CI.md). Renaming a CI
   job means updating the ruleset's required checks too.
 - Coverage target ~80% is reported, not a CI gate. Don't write brittle tests just to hit it.
 - Tests: unit `src/**/*.spec.ts` (api, shared) / `src/**/*.test.tsx` (web); integration

@@ -182,16 +182,21 @@ git switch main && git pull
 ### Viewing or changing it
 
 - **UI:** Settings → Rules → Rulesets → `protect-main`.
-- **As code:** [`.github/rulesets/protect-main.json`](../.github/rulesets/protect-main.json) is the
-  ruleset definition. GitHub doesn't read it from the repo automatically; it's applied through the
-  API. To recreate the ruleset (e.g. on a fork) or apply edits to it:
+- **As code:** [`docs/rulesets/protect-main.json`](rulesets/protect-main.json) is a **copy** of the
+  ruleset, kept for review and re-creation. It enforces nothing: GitHub enforces the ruleset
+  stored in the repository settings and never reads this file. The two only stay in sync if
+  protection changes are made by editing the file in a PR and then applying it (run from the repo
+  root):
 
   ```bash
-  # create (when it doesn't exist yet)
-  gh api -X POST repos/jvswatson/location-search/rulesets --input .github/rulesets/protect-main.json
+  # create (when it doesn't exist yet, e.g. on a fork)
+  gh api -X POST repos/jvswatson/location-search/rulesets --input docs/rulesets/protect-main.json
   # update the existing one in place
-  gh api -X PUT repos/jvswatson/location-search/rulesets/$(gh api repos/jvswatson/location-search/rulesets --jq '.[] | select(.name=="protect-main") | .id') --input .github/rulesets/protect-main.json
+  gh api -X PUT repos/jvswatson/location-search/rulesets/$(gh api repos/jvswatson/location-search/rulesets --jq '.[] | select(.name=="protect-main") | .id') --input docs/rulesets/protect-main.json
   ```
+
+  The UI can also load it: Settings → Rules → Rulesets → New ruleset → **Import a ruleset**. A
+  change made directly in the UI is not reflected here until the file is updated to match.
 
 - **Renaming a CI job** changes its check name; update the ruleset at the same time, or PRs will
   wait forever for a check that no longer reports.
