@@ -45,7 +45,15 @@ pnpm test:e2e
   distances/radii in **miles** in the API and UI. PostGIS still works in meters internally.
 - API is read-only, under `/api/v1`. Rate limit 100 req/s per IP (env-configurable), `/health`
   exempt.
-- Search: text + filters + map radius all combine. `SearchStrategy` seam in the service layer
+- Map areas: one at a time, chosen by a _Radius | Rectangle_ switch (switching clears the area).
+  Radius = `lat`/`lng`/`radiusMi`; rectangle = two clicks → `bbox` (no antimeridian crossing,
+  checked in UI and API). Distance (and the default distance sort) is from the area's center,
+  returned as `meta.center`; a rectangle's center is its lng/lat midpoint. A rectangle restored
+  from the URL is framed on load; one just drawn is not refit. Polygon mode is planned (PR 2).
+- Request limits (shared constants, enforced in API **and** UI): 50 `country` values, 100-char
+  `q`, 8,000-char request URL (414). `src/common/request-size.spec.ts` pins the worst-case URL
+  built from real data below half the cap; keep it passing when adding parameters.
+- Search: text + filters + map area all combine. `SearchStrategy` seam in the service layer
   (v1 = text: exact code match > full-text rank > trigram). No vector search in v1.
 - UI: prompt to click the map or search; the table lists all airports until a filter is active.
   Pins cover **every** match (via `/airports/points`), not just the current page. Pins are

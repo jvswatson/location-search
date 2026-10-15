@@ -2,6 +2,8 @@ import {
   type AirportFeatureCollection,
   DEFAULT_PAGE_LIMIT,
   type ErrorResponse,
+  MAX_COUNTRIES,
+  MAX_REQUEST_URL_LENGTH,
   GEOJSON_MEDIA_TYPE,
   type Paginated,
   type AirportDto,
@@ -52,6 +54,38 @@ describe('airports API (e2e)', () => {
       expect(body.data[0]).not.toHaveProperty('distanceMi');
     });
 
+    it('measures and sorts by distance from the bbox midpoint, reported as meta.center', async () => {
+      const res = await request(http)
+        .get(`${api}/airports`)
+        .query({ bbox: '-1,51,1,52' })
+        .expect(200);
+      const body = res.body as Paginated<AirportDto>;
+      expect(body.meta).toEqual({
+        total: 15,
+        page: 1,
+        limit: DEFAULT_PAGE_LIMIT,
+        pageCount: 1,
+        center: { lat: 51.5, lng: 0 },
+      });
+      const distances = body.data.map((a) => a.distanceMi!);
+      expect(distances.every((d) => typeof d === 'number')).toBe(true);
+      expect(distances).toEqual([...distances].sort((a, b) => a - b));
+    });
+
+    it('reports the radius center as meta.center too', async () => {
+      const res = await request(http)
+        .get(`${api}/airports`)
+        .query({ lat: 51.5, lng: -0.12, radiusMi: 10 })
+        .expect(200);
+      expect(res.body.meta.center).toEqual({ lat: 51.5, lng: -0.12 });
+    });
+
+    it('accepts exactly the maximum number of countries', async () => {
+      const country = Array.from({ length: MAX_COUNTRIES }, (_, i) => `Country ${i}`);
+      const res = await request(http).get(`${api}/airports`).query({ country }).expect(200);
+      expect(res.body.meta.total).toBe(0);
+    });
+
     it('searches text and ranks the exact code first', async () => {
       const res = await request(http).get(`${api}/airports`).query({ q: 'lhr' }).expect(200);
       expect(res.body.data[0]).toEqual({
@@ -75,7 +109,13 @@ describe('airports API (e2e)', () => {
       const body = res.body as Paginated<AirportDto>;
       expect(body.data.map((a) => a.icaoCode)).toEqual(['EGLC', 'EGLL', 'EGKK']);
       expect(body.data.map((a) => a.distanceMi)).toEqual([7.5, 14.8, 24.5]);
-      expect(body.meta).toEqual({ total: 3, page: 1, limit: DEFAULT_PAGE_LIMIT, pageCount: 1 });
+      expect(body.meta).toEqual({
+        total: 3,
+        page: 1,
+        limit: DEFAULT_PAGE_LIMIT,
+        pageCount: 1,
+        center: { lat: 51.5, lng: -0.12 },
+      });
     });
 
     it('pages with stable meta', async () => {
@@ -118,11 +158,46 @@ describe('airports API (e2e)', () => {
       [{ limit: '101' }, /limit must not be greater than 100/],
       [{ hasIata: 'maybe' }, /hasIata must be a boolean/],
       [{ unknown: 'x' }, /property unknown should not exist/],
+      [
+        { lat: '51.5', lng: '-0.12', radiusMi: '10', bbox: '-1,51,1,52' },
+        /use either lat, lng and radiusMi or bbox, not both/,
+      ],
+      [
+        { country: Array.from({ length: MAX_COUNTRIES + 1 }, (_, i) => `Country ${i}`) },
+        /country accepts at most 50 values/,
+      ],
     ])('400s with the error shape for %j', async (query, pattern) => {
       const res = await request(http).get(`${api}/airports`).query(query).expect(400);
       expectError(res.body, 400);
       expect(res.body.error).toBe('Bad Request');
       expect([res.body.message].flat().join('\n')).toMatch(pattern);
+    });
+  });
+
+  describe('request URL length', () => {
+    // `x` is an unknown parameter: at the limit it reaches validation (400); over it, it doesn't.
+    const urlOfLength = (length: number) => {
+      const base = `${api}/airports?x=`;
+      return base + 'a'.repeat(length - base.length);
+    };
+
+    it(`lets a ${MAX_REQUEST_URL_LENGTH}-character URL through to validation`, async () => {
+      const url = urlOfLength(MAX_REQUEST_URL_LENGTH);
+      expect(url).toHaveLength(MAX_REQUEST_URL_LENGTH);
+      const res = await request(http).get(url).expect(400);
+      expect(res.body.message).toEqual(['property x should not exist']);
+    });
+
+    it('answers 414 in the error shape, before validation, one character over', async () => {
+      const res = await request(http)
+        .get(urlOfLength(MAX_REQUEST_URL_LENGTH + 1))
+        .expect(414);
+      expectError(res.body, 414);
+      expect(res.body).toEqual({
+        statusCode: 414,
+        error: 'URI Too Long',
+        message: `Request URL is ${MAX_REQUEST_URL_LENGTH + 1} characters; the limit is ${MAX_REQUEST_URL_LENGTH}`,
+      });
     });
   });
 

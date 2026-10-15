@@ -2,10 +2,18 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { milesToMeters } from '@location-search/shared';
+import { MAX_COUNTRIES, milesToMeters } from '@location-search/shared';
 import { App } from './App';
 import { destinationPoint } from './lib/geo';
-import { dragTarget, mapHandlers } from './test/leafletMock';
+import { ANTIMERIDIAN_ERROR } from './lib/geo';
+import {
+  doubleClickZoom,
+  dragTarget,
+  fireMapEvent,
+  fitBounds,
+  mapHandlers,
+  mapSize,
+} from './test/leafletMock';
 import { errorResponse, makeAirport, mockApi, paginated } from './test/server';
 
 vi.mock('react-leaflet', async () => (await import('./test/leafletMock')).createReactLeafletMock());
@@ -241,7 +249,7 @@ describe('map interaction', () => {
     await userEvent.selectOptions(screen.getByLabelText('Radius'), '250');
     await waitFor(() => expect(params(last(rec.airports)).radiusMi).toBe('250'));
 
-    await userEvent.click(screen.getByRole('button', { name: 'Clear location' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Clear area' }));
     expect(map).not.toHaveAttribute('data-center');
     expect(screen.getByTestId('map-prompt')).toBeInTheDocument();
     await waitFor(() => expect(map).toHaveAttribute('data-pin-count', '0'));
@@ -291,5 +299,317 @@ describe('URL state', () => {
     await userEvent.click(screen.getByLabelText('Has IATA code'));
     await waitFor(() => expect(window.location.search).toContain('hasIata=true'));
     expect(window.location.search).not.toContain('page=');
+  });
+});
+
+describe('rectangle mode', () => {
+  const moveMouse = (lat: number, lng: number) =>
+    act(() => mapHandlers.mousemove?.({ latlng: { lat, lng } }));
+  const chooseRectangle = () => userEvent.click(screen.getByRole('radio', { name: 'Rectangle' }));
+
+  /** A page whose rows carry distances and whose meta reports the box center, like the API. */
+  const rectangleApi = () =>
+    mockApi({
+      airports: (url) =>
+        url.searchParams.has('bbox')
+          ? {
+              ...paginated([makeAirport(1, { distanceMi: 3.4 })]),
+              meta: { ...paginated([]).meta, total: 1, center: { lat: 51.5, lng: 0 } },
+            }
+          : paginated([makeAirport(1), makeAirport(2)]),
+      points: (url) =>
+        url.searchParams.has('bbox')
+          ? { data: [{ icaoCode: 'K001', lat: 51.4, lng: 0.1 }], total: 1 }
+          : { data: [], total: 0 },
+    });
+
+  it('switching modes clears the current area and changes the prompt', async () => {
+    mockApi();
+    renderApp();
+    await screen.findAllByTestId('airport-row');
+    await clickMap(40, -100);
+    expect(screen.getByTestId('airport-map')).toHaveAttribute('data-center', '40,-100');
+
+    await chooseRectangle();
+    const map = screen.getByTestId('airport-map');
+    expect(map).not.toHaveAttribute('data-center');
+    expect(map).toHaveAttribute('data-mode', 'rectangle');
+    expect(screen.queryByTestId('circle')).not.toBeInTheDocument();
+    expect(screen.getByTestId('map-prompt')).toHaveTextContent(
+      'Click two corners on the map or search to start filtering',
+    );
+    expect(window.location.search).toBe('?area=rectangle');
+    expect(doubleClickZoom.disable).toHaveBeenCalled();
+  });
+
+  it('draws with two clicks and searches the box, with distances from its center', async () => {
+    const rec = rectangleApi();
+    renderApp();
+    await screen.findAllByTestId('airport-row');
+    await chooseRectangle();
+    fitBounds.mockClear();
+
+    expect(screen.getByTestId('map-prompt')).toBeInTheDocument();
+    await clickMap(51, -1);
+    expect(screen.getByTestId('draw-hint')).toHaveTextContent('Click the opposite corner');
+    // Only the drawing hint shows mid-draw; the start prompt would compete with it.
+    expect(screen.queryByTestId('map-prompt')).not.toBeInTheDocument();
+    await moveMouse(51.6, 0.4);
+    expect(screen.getByTestId('rectangle-preview')).toHaveAttribute(
+      'data-bounds',
+      '51,-1,51.6,0.4',
+    );
+    expect(rec.airports.some((u) => u.searchParams.has('bbox'))).toBe(false);
+
+    await clickMap(52, 1);
+    const map = screen.getByTestId('airport-map');
+    expect(map).toHaveAttribute('data-bbox', '-1,51,1,52');
+    expect(screen.queryByTestId('rectangle-preview')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('draw-hint')).not.toBeInTheDocument();
+    expect(screen.getByTestId('rectangle')).toHaveAttribute('data-bounds', '51,-1,52,1');
+
+    await waitFor(() => expect(params(last(rec.airports))).toMatchObject({ bbox: '-1,51,1,52' }));
+    expect(last(rec.airports).searchParams.has('lat')).toBe(false);
+    expect(params(last(rec.points))).toEqual({ bbox: '-1,51,1,52' });
+    await waitFor(() => expect(map).toHaveAttribute('data-pin-count', '1'));
+    expect(await screen.findByText('3.4')).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: /Distance/ })).toBeInTheDocument();
+    expect(screen.getByTestId('search-center')).toHaveAttribute('data-position', '51.5,0');
+    expect(window.location.search).toBe('?area=rectangle&bbox=-1%2C51%2C1%2C52');
+    // A box the user just drew is not re-framed.
+    expect(fitBounds).not.toHaveBeenCalled();
+  });
+
+  it('Escape cancels a half-drawn rectangle', async () => {
+    mockApi();
+    renderApp();
+    await screen.findAllByTestId('airport-row');
+    await chooseRectangle();
+    await clickMap(51, -1);
+    expect(screen.getByTestId('rectangle-preview')).toBeInTheDocument();
+
+    await userEvent.keyboard('{Escape}');
+    expect(screen.queryByTestId('rectangle-preview')).not.toBeInTheDocument();
+    // The next click starts a new rectangle rather than finishing the cancelled one.
+    await clickMap(10, 10);
+    expect(screen.getByTestId('airport-map')).not.toHaveAttribute('data-bbox');
+    expect(screen.getByTestId('draw-hint')).toBeInTheDocument();
+  });
+
+  it('refuses a rectangle across the antimeridian with a message and no request', async () => {
+    const rec = mockApi();
+    renderApp();
+    await screen.findAllByTestId('airport-row');
+    await chooseRectangle();
+    await clickMap(0, 170);
+    await clickMap(10, 190);
+
+    expect(screen.getByTestId('draw-error')).toHaveTextContent(ANTIMERIDIAN_ERROR);
+    expect(screen.getByTestId('airport-map')).not.toHaveAttribute('data-bbox');
+    expect(rec.airports.some((u) => u.searchParams.has('bbox'))).toBe(false);
+
+    // Starting a new rectangle clears the message.
+    await clickMap(0, 10);
+    expect(screen.queryByTestId('draw-error')).not.toBeInTheDocument();
+  });
+
+  it('switching back to Radius drops the rectangle', async () => {
+    const rec = rectangleApi();
+    renderApp();
+    await screen.findAllByTestId('airport-row');
+    await chooseRectangle();
+    await clickMap(51, -1);
+    await clickMap(52, 1);
+    await waitFor(() => expect(params(last(rec.airports)).bbox).toBe('-1,51,1,52'));
+
+    await userEvent.click(screen.getByRole('radio', { name: 'Radius' }));
+    expect(screen.getByTestId('airport-map')).not.toHaveAttribute('data-bbox');
+    expect(screen.queryByTestId('rectangle')).not.toBeInTheDocument();
+    await waitFor(() => expect(last(rec.airports).searchParams.has('bbox')).toBe(false));
+    expect(window.location.search).toBe('');
+  });
+
+  it('restores a rectangle from the URL and frames it once', async () => {
+    window.history.replaceState(null, '', '/?bbox=-1,51,1,52');
+    const rec = rectangleApi();
+    fitBounds.mockClear();
+    renderApp();
+
+    const map = screen.getByTestId('airport-map');
+    expect(map).toHaveAttribute('data-mode', 'rectangle');
+    expect(map).toHaveAttribute('data-bbox', '-1,51,1,52');
+    await waitFor(() => expect(params(rec.airports[0]!)).toMatchObject({ bbox: '-1,51,1,52' }));
+    expect(fitBounds).toHaveBeenCalledWith(
+      [
+        [51, -1],
+        [52, 1],
+      ],
+      expect.anything(),
+    );
+  });
+});
+
+describe('clearing never moves the map', () => {
+  /** Pins for any area query (so there are pins to clear), none otherwise; q adds its own pins. */
+  const areaApi = () =>
+    mockApi({
+      points: (url) => {
+        if (url.searchParams.has('q')) {
+          return { data: [{ icaoCode: 'Q001', lat: 10, lng: 10 }], total: 1 };
+        }
+        const hasArea = url.searchParams.has('bbox') || url.searchParams.has('lat');
+        return hasArea
+          ? {
+              data: [
+                { icaoCode: 'K001', lat: 51.2, lng: -0.5 },
+                { icaoCode: 'K002', lat: 51.8, lng: 0.5 },
+              ],
+              total: 2,
+            }
+          : { data: [], total: 0 };
+      },
+    });
+
+  const settledWithoutArea = async () => {
+    await waitFor(() =>
+      expect(screen.getByTestId('airport-map')).toHaveAttribute('data-pin-count', '0'),
+    );
+    expect(screen.getByTestId('map-prompt')).toBeInTheDocument();
+  };
+
+  it('Clear area after a rectangle leaves the view alone', async () => {
+    window.history.replaceState(null, '', '/?bbox=-1,51,1,52');
+    areaApi();
+    renderApp();
+    await waitFor(() =>
+      expect(screen.getByTestId('airport-map')).toHaveAttribute('data-pin-count', '2'),
+    );
+    fitBounds.mockClear();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Clear area' }));
+    await settledWithoutArea();
+    expect(fitBounds).not.toHaveBeenCalled();
+  });
+
+  it('Clear area after a radius leaves the view alone', async () => {
+    areaApi();
+    renderApp();
+    await screen.findAllByTestId('airport-row');
+    await clickMap(51.5, 0);
+    await waitFor(() =>
+      expect(screen.getByTestId('airport-map')).toHaveAttribute('data-pin-count', '2'),
+    );
+    fitBounds.mockClear();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Clear area' }));
+    await settledWithoutArea();
+    expect(fitBounds).not.toHaveBeenCalled();
+  });
+
+  it('switching modes leaves the view alone', async () => {
+    window.history.replaceState(null, '', '/?bbox=-1,51,1,52');
+    areaApi();
+    renderApp();
+    await waitFor(() =>
+      expect(screen.getByTestId('airport-map')).toHaveAttribute('data-pin-count', '2'),
+    );
+    fitBounds.mockClear();
+
+    await userEvent.click(screen.getByRole('radio', { name: 'Radius' }));
+    await settledWithoutArea();
+    expect(fitBounds).not.toHaveBeenCalled();
+  });
+
+  it('still frames the pins of a new text search after clearing', async () => {
+    window.history.replaceState(null, '', '/?bbox=-1,51,1,52');
+    areaApi();
+    renderApp();
+    await waitFor(() =>
+      expect(screen.getByTestId('airport-map')).toHaveAttribute('data-pin-count', '2'),
+    );
+    await userEvent.click(screen.getByRole('button', { name: 'Clear area' }));
+    await settledWithoutArea();
+    fitBounds.mockClear();
+
+    await userEvent.type(screen.getByLabelText('Search airports'), 'abc');
+    await waitFor(() => expect(fitBounds).toHaveBeenCalled());
+    expect(fitBounds).toHaveBeenLastCalledWith(
+      [
+        [10, 10],
+        [10, 10],
+      ],
+      expect.anything(),
+    );
+  });
+});
+
+describe('framing on load', () => {
+  afterEach(() => {
+    mapSize.x = 800;
+    mapSize.y = 600;
+  });
+
+  it('waits for a map laid out at zero size to have a size before framing the area', async () => {
+    // Fitting a 0×0 map makes Leaflet pick the maximum zoom; the fit must wait for a real size.
+    mapSize.x = 0;
+    mapSize.y = 0;
+    window.history.replaceState(null, '', '/?bbox=-1,51,1,52');
+    mockApi();
+    fitBounds.mockClear();
+    renderApp();
+    await screen.findAllByTestId('airport-row');
+    expect(fitBounds).not.toHaveBeenCalled();
+
+    // A resize while still hidden changes nothing…
+    act(() => fireMapEvent('resize'));
+    expect(fitBounds).not.toHaveBeenCalled();
+
+    // …the first one with a size frames the restored box, once.
+    mapSize.x = 800;
+    mapSize.y = 600;
+    act(() => fireMapEvent('resize'));
+    act(() => fireMapEvent('resize'));
+    expect(fitBounds).toHaveBeenCalledOnce();
+    expect(fitBounds).toHaveBeenCalledWith(
+      [
+        [51, -1],
+        [52, 1],
+      ],
+      expect.anything(),
+    );
+  });
+});
+
+describe('country limit', () => {
+  it(`stops selection at ${MAX_COUNTRIES} countries and explains why`, async () => {
+    const names = Array.from({ length: MAX_COUNTRIES + 2 }, (_, i) => `Country ${i}`);
+    window.history.replaceState(
+      null,
+      '',
+      `/?${names
+        .slice(0, MAX_COUNTRIES)
+        .map((c) => `country=${encodeURIComponent(c)}`)
+        .join('&')}`,
+    );
+    mockApi({ countries: names.map((country) => ({ country, count: 1 })) });
+    renderApp();
+    await userEvent.click(await screen.findByRole('button', { name: /Countries \(50\)/ }));
+
+    const group = screen.getByRole('group', { name: 'Countries' });
+    // The label holds the name and its count, so match the checkbox through the exact name text.
+    const checkbox = (name: string) =>
+      within(within(group).getByText(name, { exact: true }).closest('label')!).getByRole(
+        'checkbox',
+      );
+    expect(within(group).getByRole('status')).toHaveTextContent(
+      `Up to ${MAX_COUNTRIES} countries can be selected`,
+    );
+    expect(checkbox('Country 50')).toBeDisabled();
+    expect(checkbox('Country 0')).toBeEnabled();
+
+    // Unchecking one makes room again.
+    await userEvent.click(checkbox('Country 0'));
+    expect(within(group).queryByRole('status')).not.toBeInTheDocument();
+    expect(checkbox('Country 50')).toBeEnabled();
   });
 });

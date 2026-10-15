@@ -94,3 +94,55 @@ export function pointsBounds(points: readonly LatLng[]): Bounds | null {
     [north, east],
   ];
 }
+
+/** `[minLng, minLat, maxLng, maxLat]`, the API's bbox order. */
+export type BBox = [number, number, number, number];
+
+export type RectangleResult = { ok: true; bbox: BBox } | { ok: false; error: string };
+
+export const ANTIMERIDIAN_ERROR =
+  "A search area can't cross the antimeridian (±180° longitude). Draw it on one side.";
+export const DEGENERATE_RECTANGLE_ERROR = 'Click two different corners to draw a rectangle.';
+
+/**
+ * The rectangle spanned by two clicked corners, in either order. Leaflet reports unwrapped
+ * longitudes on panned world copies (e.g. 190°), so both corners are shifted into −180…180 by the
+ * same multiple of 360°; if that leaves the second corner outside the range, the rectangle crosses
+ * the antimeridian, which the API rejects. Coordinates are rounded to 5 decimals (~1 m).
+ */
+export function rectangleFromCorners(a: LatLng, b: LatLng): RectangleResult {
+  const shift = Math.floor((a.lng + 180) / 360) * 360;
+  const lngA = a.lng - shift;
+  const lngB = b.lng - shift;
+  if (lngB < -180 || lngB > 180) return { ok: false, error: ANTIMERIDIAN_ERROR };
+
+  const clampLat = (lat: number) => Math.max(-90, Math.min(90, lat));
+  const minLng = roundCoord(Math.min(lngA, lngB));
+  const maxLng = roundCoord(Math.max(lngA, lngB));
+  const minLat = roundCoord(clampLat(Math.min(a.lat, b.lat)));
+  const maxLat = roundCoord(clampLat(Math.max(a.lat, b.lat)));
+  if (minLng === maxLng || minLat === maxLat)
+    return { ok: false, error: DEGENERATE_RECTANGLE_ERROR };
+  return { ok: true, bbox: [minLng, minLat, maxLng, maxLat] };
+}
+
+export function bboxBounds([minLng, minLat, maxLng, maxLat]: BBox): Bounds {
+  return [
+    [minLat, minLng],
+    [maxLat, maxLng],
+  ];
+}
+
+export const sameBBox = (a: BBox | null, b: BBox | null): boolean =>
+  a === b || (a !== null && b !== null && a.every((v, i) => v === b[i]));
+
+/** Parses `minLng,minLat,maxLng,maxLat`; null unless it is a valid, non-wrapping box. */
+export function parseBBox(raw: string | null): BBox | null {
+  if (!raw) return null;
+  const parts = raw.split(',').map((p) => (p.trim() === '' ? NaN : Number(p)));
+  if (parts.length !== 4 || parts.some((n) => !Number.isFinite(n))) return null;
+  const [minLng, minLat, maxLng, maxLat] = parts as BBox;
+  const lngOk = minLng >= -180 && maxLng <= 180 && minLng < maxLng;
+  const latOk = minLat >= -90 && maxLat <= 90 && minLat < maxLat;
+  return lngOk && latOk ? [minLng, minLat, maxLng, maxLat] : null;
+}

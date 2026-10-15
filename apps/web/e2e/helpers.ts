@@ -15,10 +15,13 @@ export async function openApp(page: Page, search = ''): Promise<void> {
   await expect(rows(page).first()).toBeVisible();
 }
 
-/** The filters currently in the page URL, as /airports/points accepts them (no sort or paging). */
+/**
+ * The filters currently in the page URL, as /airports/points accepts them: no sort or paging, and
+ * no `area` (the UI's drawing mode, not an API filter).
+ */
 export function filtersFromUrl(page: Page): string {
   const params = new URL(page.url()).searchParams;
-  for (const key of ['sort', 'order', 'page', 'limit']) params.delete(key);
+  for (const key of ['sort', 'order', 'page', 'limit', 'area']) params.delete(key);
   return params.toString();
 }
 

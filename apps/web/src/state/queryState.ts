@@ -1,13 +1,18 @@
 import {
   DEFAULT_PAGE_LIMIT,
+  MAX_COUNTRIES,
   SORT_FIELDS,
   type AirportSearchParams,
   type SortField,
   type SortOrder,
 } from '@location-search/shared';
-import { clampRadius, type LatLng } from '../lib/geo';
+import { type BBox, clampRadius, type LatLng, parseBBox } from '../lib/geo';
 
 export const DEFAULT_RADIUS_MI = 50;
+
+/** How a click on the map defines the search area. One area at a time. */
+export const AREA_MODES = ['radius', 'rectangle'] as const;
+export type AreaMode = (typeof AREA_MODES)[number];
 
 export interface QueryState {
   q: string;
@@ -15,8 +20,12 @@ export interface QueryState {
   minAltitudeFt?: number;
   maxAltitudeFt?: number;
   hasIata: boolean;
+  areaMode: AreaMode;
+  /** Radius mode: the clicked center. Always null in rectangle mode. */
   center: LatLng | null;
   radiusMi: number;
+  /** Rectangle mode: the drawn box. Always null in radius mode. */
+  bbox: BBox | null;
   sort?: SortField;
   order?: SortOrder;
   page: number;
@@ -26,15 +35,30 @@ export const initialState: QueryState = {
   q: '',
   countries: [],
   hasIata: false,
+  areaMode: 'radius',
   center: null,
   radiusMi: DEFAULT_RADIUS_MI,
+  bbox: null,
   page: 1,
 };
 
-/** True when any filter narrows the result set (page, sort and radius alone do not). */
+/** True when the search has an area (a radius center or a rectangle) to measure distance from. */
+export const hasArea = (s: QueryState): boolean => s.center !== null || s.bbox !== null;
+
+/** Identity of the filters other than the map area (text, countries, altitude, IATA). */
+export const nonAreaFilterKey = (s: QueryState): string =>
+  JSON.stringify([
+    s.q.trim(),
+    s.countries,
+    s.minAltitudeFt ?? null,
+    s.maxAltitudeFt ?? null,
+    s.hasIata,
+  ]);
+
+/** True when any filter narrows the result set (page, sort, mode and radius alone do not). */
 export function isFilterActive(s: QueryState): boolean {
   return (
-    s.center !== null ||
+    hasArea(s) ||
     s.q.trim() !== '' ||
     s.countries.length > 0 ||
     s.minAltitudeFt !== undefined ||
@@ -46,7 +70,7 @@ export function isFilterActive(s: QueryState): boolean {
 /** Drops sort choices that the current filters make invalid. */
 export function normalizeState(s: QueryState): QueryState {
   const invalid =
-    (s.sort === 'relevance' && s.q.trim() === '') || (s.sort === 'distance' && s.center === null);
+    (s.sort === 'relevance' && s.q.trim() === '') || (s.sort === 'distance' && !hasArea(s));
   if (!invalid) return s;
   const { sort: _sort, order: _order, ...rest } = s;
   return rest;
@@ -55,7 +79,7 @@ export function normalizeState(s: QueryState): QueryState {
 export function effectiveSort(s: QueryState): SortField {
   if (s.sort) return s.sort;
   if (s.q.trim()) return 'relevance';
-  return s.center ? 'distance' : 'name';
+  return hasArea(s) ? 'distance' : 'name';
 }
 
 export function effectiveOrder(s: QueryState): SortOrder {
@@ -75,6 +99,8 @@ export function serializeState(s: QueryState): string {
   if (s.minAltitudeFt !== undefined) p.set('minAltitudeFt', String(s.minAltitudeFt));
   if (s.maxAltitudeFt !== undefined) p.set('maxAltitudeFt', String(s.maxAltitudeFt));
   if (s.hasIata) p.set('hasIata', 'true');
+  if (s.areaMode !== 'radius') p.set('area', s.areaMode);
+  if (s.bbox) p.set('bbox', s.bbox.join(','));
   if (s.center) {
     p.set('lat', String(s.center.lat));
     p.set('lng', String(s.center.lng));
@@ -88,20 +114,35 @@ export function serializeState(s: QueryState): string {
 
 export function parseState(search: string): QueryState {
   const p = new URLSearchParams(search);
+  const bbox = parseBBox(p.get('bbox'));
+  // An explicit area= wins; otherwise a valid bbox implies rectangle mode.
+  const areaParam = p.get('area');
+  const areaMode: AreaMode = (AREA_MODES as readonly string[]).includes(areaParam ?? '')
+    ? (areaParam as AreaMode)
+    : bbox
+      ? 'rectangle'
+      : 'radius';
   const lat = num(p.get('lat'));
   const lng = num(p.get('lng'));
   const hasCenter =
-    lat !== undefined && lng !== undefined && Math.abs(lat) <= 90 && Math.abs(lng) <= 180;
+    areaMode === 'radius' &&
+    lat !== undefined &&
+    lng !== undefined &&
+    Math.abs(lat) <= 90 &&
+    Math.abs(lng) <= 180;
   const radius = num(p.get('radiusMi'));
   const sort = p.get('sort');
   const order = p.get('order');
   const page = num(p.get('page'));
   const state: QueryState = {
     q: p.get('q') ?? '',
-    countries: [...new Set(p.getAll('country').filter((c) => c !== ''))],
+    // A hand-edited or old link could carry more than the API accepts; keep the first MAX_COUNTRIES.
+    countries: [...new Set(p.getAll('country').filter((c) => c !== ''))].slice(0, MAX_COUNTRIES),
     hasIata: p.get('hasIata') === 'true',
+    areaMode,
     center: hasCenter ? { lat, lng } : null,
     radiusMi: radius === undefined ? DEFAULT_RADIUS_MI : clampRadius(radius),
+    bbox: areaMode === 'rectangle' ? bbox : null,
     page: page !== undefined && page >= 1 ? Math.floor(page) : 1,
   };
   const minAlt = num(p.get('minAltitudeFt'));
@@ -127,6 +168,7 @@ export function toFilterParams(s: QueryState): AirportSearchParams {
     params.lng = s.center.lng;
     params.radiusMi = s.radiusMi;
   }
+  if (s.bbox) params.bbox = s.bbox;
   return params;
 }
 

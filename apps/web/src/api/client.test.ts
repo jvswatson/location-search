@@ -1,5 +1,14 @@
-import { describe, expect, it } from 'vitest';
-import { airportsQuery, buildQueryString, pointsQuery } from './client';
+import { describe, expect, it, vi } from 'vitest';
+import { MAX_REQUEST_URL_LENGTH } from '@location-search/shared';
+import {
+  airportsQuery,
+  ApiError,
+  buildQueryString,
+  fetchAirports,
+  pointsQuery,
+  REQUEST_TOO_LARGE_MESSAGE,
+} from './client';
+import { describeError } from './errors';
 
 describe('buildQueryString', () => {
   it('repeats array params and omits empties', () => {
@@ -24,5 +33,24 @@ describe('airportsQuery / pointsQuery', () => {
     expect(
       pointsQuery({ q: 'x', sort: 'name', order: 'asc', page: 3, limit: 25, country: ['A'] }),
     ).toBe('q=x&country=A');
+  });
+});
+
+describe('request size guard', () => {
+  it(`refuses to send a URL over ${MAX_REQUEST_URL_LENGTH} characters, with a friendly message`, async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    const country = Array.from({ length: 600 }, (_, i) => `A very long country name ${i}`);
+    const err = await fetchAirports({ country }).catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(ApiError);
+    expect((err as ApiError).status).toBe(414);
+    expect(describeError(err)).toBe(REQUEST_TOO_LARGE_MESSAGE);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
+  });
+
+  it('shows the same friendly message for a 414 from the API', () => {
+    const err = new ApiError(414, 'Request URL is 9001 characters; the limit is 8000');
+    expect(describeError(err)).toBe(REQUEST_TOO_LARGE_MESSAGE);
   });
 });

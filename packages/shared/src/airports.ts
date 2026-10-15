@@ -23,11 +23,21 @@ export interface AirportPointDto {
   lng: number;
 }
 
+export interface GeoPoint {
+  lat: number;
+  lng: number;
+}
+
 export interface PageMeta {
   total: number;
   page: number;
   limit: number;
   pageCount: number;
+  /**
+   * The point `distanceMi` is measured from, when the search has one: the radius center, or the
+   * center (lng/lat midpoint) of `bbox`. Absent when there is no area filter.
+   */
+  center?: GeoPoint;
 }
 
 export interface Paginated<T> {
@@ -57,15 +67,19 @@ export interface AirportFilters {
   hasIata?: boolean;
   minAltitudeFt?: number;
   maxAltitudeFt?: number;
-  /** Center for a radius search; lat, lng and radiusMi must be given together. */
+  /**
+   * Center for a radius search; lat, lng and radiusMi must be given together. A search uses at most
+   * one area: a radius or a bbox, not both.
+   */
   lat?: number;
   lng?: number;
   radiusMi?: number;
+  /** Rectangle in lng/lat (straight edges on the map); must not cross the antimeridian. */
   bbox?: [minLng: number, minLat: number, maxLng: number, maxLat: number];
 }
 
 export interface AirportSearchParams extends AirportFilters {
-  /** Defaults: relevance when q is set, else distance when a center is set, else name. */
+  /** Defaults: relevance when q is set, else distance when there is a radius or bbox, else name. */
   sort?: SortField;
   order?: SortOrder;
   page?: number;
@@ -108,6 +122,13 @@ export const MAX_RADIUS_MI = 3000;
 export const DEFAULT_PAGE_LIMIT = 25;
 export const MAX_PAGE_LIMIT = 100;
 export const MAX_NEAREST_K = 50;
+/** Most `country` values one request may carry (keeps URLs well under proxy limits). */
+export const MAX_COUNTRIES = 50;
+/**
+ * Longest request URL (path + query) the API accepts and the web client will send. The parameter
+ * caps keep real requests far below this; it is a backstop, enforced on both sides (414).
+ */
+export const MAX_REQUEST_URL_LENGTH = 8000;
 export const DEFAULT_NEAREST_K = 5;
 /** Longest accepted `q` after trimming. */
 export const MAX_QUERY_LENGTH = 100;
