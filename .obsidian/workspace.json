@@ -219,6 +219,10 @@
   },
   "active": "ae598512f8c3a05c",
   "lastOpenFiles": [
+    "apps/web/e2e/map-rectangle.spec.ts",
+    "apps/web/src/lib/geo.rect.test.ts",
+    "apps/web/src/components/AreaControls.test.tsx",
+    "apps/web/src/components/AreaControls.tsx",
     "apps/api/src/common/request-size-measure.spec.ts",
     "apps/api/src/common/request-size.measure.spec.ts",
     "apps/api/src/common/request-size.spec.ts",

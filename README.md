@@ -2,7 +2,8 @@
 
 A read-only airport search app. A NestJS + PostGIS API serves 4,187 airports from the GADB dataset;
 a React + Leaflet UI lets you search by text, filter, and narrow results by clicking the map to
-search within a radius. Everything combines: text, filters and radius apply together.
+search within a radius, or by clicking two corners to search a rectangle. Everything combines:
+text, filters and the map area apply together.
 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): containers, request pipeline, and browser-to-database
   call diagrams
@@ -97,6 +98,23 @@ in **feet**. Response and parameter types live in `packages/shared/src/airports.
 | POST   | `/airports/within`        | Airports inside a GeoJSON Polygon body                                                                                                                                                             |
 | GET    | `/countries`              | Countries with airport counts                                                                                                                                                                      |
 | GET    | `/health`                 | Liveness and database/PostGIS status                                                                                                                                                               |
+
+**Map areas.** A search takes at most one area: a radius (`lat`+`lng`+`radiusMi`) or a rectangle
+(`bbox=minLng,minLat,maxLng,maxLat`, straight edges on the map, no antimeridian crossing). Sending
+both is a 400. With either, rows carry `distanceMi` from the area's center, distance is the default
+sort, and `meta.center` reports that center (the bbox center is its lng/lat midpoint).
+
+**Limits.** These keep every request far below common proxy URL limits (e.g. nginx's 8 KB);
+a unit test builds the worst-case URL from the real data and checks it stays under half the cap.
+
+| Limit                    | Value             | Over the limit                     |
+| ------------------------ | ----------------- | ---------------------------------- |
+| `q`                      | 100 characters    | 400                                |
+| `country` values         | 50                | 400 (the UI stops selection at 50) |
+| `limit` (page size)      | 100               | 400                                |
+| `radiusMi`               | 1–3,000           | 400                                |
+| Request URL (path+query) | 8,000 characters  | 414 (the UI refuses to send it)    |
+| Rate                     | 100 requests/s/IP | 429                                |
 
 Search `q` ranks exact ICAO/IATA matches first, then full-text, then fuzzy name/city. Requests are
 rate limited per IP (default 100 per second, `RATE_LIMIT_LIMIT` / `RATE_LIMIT_TTL_MS`); `/health`

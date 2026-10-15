@@ -98,7 +98,9 @@ traffic before any SQL runs, and every error leaves through one filter with one 
 
 ```mermaid
 flowchart TB
-  req(["HTTP request"]) --> express["Express<br/>trust proxy → real client IP"]
+  req(["HTTP request"]) --> urlcheck{"URL ≤ 8,000 chars?"}
+  urlcheck -- "no" --> err
+  urlcheck -- "yes" --> express["Express<br/>trust proxy → real client IP"]
   express --> route{"/api/* ?"}
   route -- "no" --> spa["serve-static<br/>index.html (SPA fallback)"]
   route -- "yes" --> throttle["ThrottlerGuard<br/>100 req / 1 s per IP<br/>(/health exempt)"]
@@ -174,6 +176,38 @@ sequenceDiagram
   B->>U: table with Distance (mi) column + 9 canvas pins
 ```
 
+### Rectangle (two clicks)
+
+Rectangle mode draws on the client, then searches like the radius flow with `bbox` instead of
+`lat`/`lng`/`radiusMi`. Distances are measured from the box's lng/lat midpoint, which the API
+returns as `meta.center` for the map's crosshair.
+
+```mermaid
+sequenceDiagram
+  autonumber
+  actor U as User
+  participant B as Browser (React)
+  participant N as Nest
+  participant P as PostGIS
+
+  U->>B: choose Rectangle (clears any radius)
+  U->>B: click first corner
+  B->>B: dashed preview follows the cursor (Esc cancels)
+  U->>B: click opposite corner
+  B->>B: rectangleFromCorners: order corners, normalize world-copy longitudes,<br/>refuse antimeridian or zero-size boxes (no request)
+  B->>B: bbox into state + URL (no refit: the user is looking at it)
+  par table page
+    B->>N: GET /api/v1/airports?bbox=-1,51,1,52&page=1&limit=25
+    N->>N: validate, one area only, default sort = distance from (0, 51.5)
+    N->>P: SELECT …, ST_Distance(geog, midpoint) AS distance_m<br/>WHERE ST_DWithin(geog, covering circle) AND lng/lat BETWEEN box<br/>ORDER BY distance_m, icao_code
+    N-->>B: rows with distanceMi + meta.center {lat: 51.5, lng: 0}
+  and every pin
+    B->>N: GET /api/v1/airports/points?bbox=-1,51,1,52
+    N-->>B: { data: 15 points, total: 15 }
+  end
+  B->>U: rectangle, crosshair at meta.center, pins, distance column
+```
+
 ### Text search combined with filters
 
 ```mermaid
@@ -246,13 +280,14 @@ Index use is asserted by `apps/api/test/integration/airports.query-plans.int-spe
 
 ## Where each concern lives
 
-| Concern                                                             | Enforced in                                                                                    |
-| ------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| Request shape and bounds                                            | DTOs + global `ValidationPipe`                                                                 |
-| Cross-field rules (lat/lng/radius together, sort needs q or center) | `search/search-criteria.ts`                                                                    |
-| SQL injection safety                                                | `AirportsRepository` + `SqlParams` (bound parameters only); `tsquery.ts` sanitizes text        |
-| Rate limiting                                                       | `ThrottlerGuard`, keyed on client IP across routes (`TRUST_PROXY` decides which hops to trust) |
-| Error shape                                                         | `HttpExceptionFilter`                                                                          |
-| Units                                                               | `packages/shared/src/units.ts`, applied in the service                                         |
-| Production configuration safety                                     | `config/env.validation.ts` (password required in production)                                   |
-| Data quality                                                        | the seed pipeline (`database/seed/*`), pinned by tests to 4,187 rows                           |
+| Concern                                                                             | Enforced in                                                                                                                                      |
+| ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Request shape and bounds                                                            | DTOs + global `ValidationPipe`                                                                                                                   |
+| Cross-field rules (lat/lng/radius together, one area only, sort needs q or an area) | `search/search-criteria.ts`                                                                                                                      |
+| SQL injection safety                                                                | `AirportsRepository` + `SqlParams` (bound parameters only); `tsquery.ts` sanitizes text                                                          |
+| Rate limiting                                                                       | `ThrottlerGuard`, keyed on client IP across routes (`TRUST_PROXY` decides which hops to trust)                                                   |
+| Request size (50 countries, 100-char `q`, 8,000-char URL)                           | DTO validation, `common/url-length.middleware.ts` (414) and the same checks in the web client; `common/request-size.spec.ts` pins the worst case |
+| Error shape                                                                         | `HttpExceptionFilter`                                                                                                                            |
+| Units                                                                               | `packages/shared/src/units.ts`, applied in the service                                                                                           |
+| Production configuration safety                                                     | `config/env.validation.ts` (password required in production)                                                                                     |
+| Data quality                                                                        | the seed pipeline (`database/seed/*`), pinned by tests to 4,187 rows                                                                             |
