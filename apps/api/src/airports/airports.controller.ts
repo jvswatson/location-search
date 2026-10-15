@@ -8,9 +8,8 @@ import {
   type PointFeatureCollection,
   type PointsResponse,
   type ResponseFormat,
-  type WithinResponse,
 } from '@location-search/shared';
-import { Body, Controller, Get, HttpCode, Param, Post, Query, Req, Res } from '@nestjs/common';
+import { Controller, Get, Param, Query, Req, Res } from '@nestjs/common';
 import {
   ApiBadRequestResponse,
   ApiNotFoundResponse,
@@ -23,12 +22,7 @@ import {
 import type { Request, Response } from 'express';
 import { airportsToGeoJson, pointsToGeoJson } from '../geo/geojson.js';
 import { AirportFiltersQueryDto, AirportSearchQueryDto } from './dto/airport-query.dto.js';
-import {
-  DistanceQueryDto,
-  IcaoParamDto,
-  NearestQueryDto,
-  WithinRequestDto,
-} from './dto/params.dto.js';
+import { DistanceQueryDto, IcaoParamDto, NearestQueryDto } from './dto/params.dto.js';
 import {
   AirportDoc,
   DistanceResponseDoc,
@@ -36,7 +30,6 @@ import {
   NearestResponseDoc,
   PaginatedAirportsDoc,
   PointsResponseDoc,
-  WithinResponseDoc,
 } from './dto/responses.dto.js';
 import { AirportsService } from './airports.service.js';
 
@@ -98,14 +91,6 @@ export class AirportsController {
   @ApiNotFoundResponse({ type: ErrorResponseDoc })
   distance(@Query() { from, to }: DistanceQueryDto): Promise<DistanceResponse> {
     return this.airports.distance(from, to);
-  }
-
-  @Post('within')
-  @HttpCode(200)
-  @ApiOperation({ summary: 'Airports inside a GeoJSON Polygon (geodesic edges).' })
-  @ApiOkResponse({ type: WithinResponseDoc })
-  within(@Body() body: WithinRequestDto): Promise<WithinResponse> {
-    return this.airports.within(body);
   }
 
   @Get(':icao')

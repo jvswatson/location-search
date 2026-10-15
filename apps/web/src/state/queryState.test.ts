@@ -23,6 +23,7 @@ const full: QueryState = {
   center: { lat: 40.64, lng: -73.78 },
   radiusMi: 123,
   bbox: null,
+  polygon: null,
   sort: 'altitude',
   order: 'desc',
   page: 3,
@@ -44,6 +45,30 @@ describe('serializeState / parseState', () => {
     const qs = serializeState(rectangle);
     expect(qs).toBe('area=rectangle&bbox=-1.5%2C51.1%2C0.25%2C51.9&sort=distance');
     expect(parseState(qs)).toEqual(rectangle);
+  });
+
+  it('round-trips a polygon as area=polygon&polygon=lng,lat;…', () => {
+    const shape: QueryState = {
+      ...initialState,
+      areaMode: 'polygon',
+      polygon: [
+        [-1, 51],
+        [1, 51],
+        [0.5, 52],
+      ],
+    };
+    const qs = serializeState(shape);
+    expect(qs).toBe('area=polygon&polygon=-1%2C51%3B1%2C51%3B0.5%2C52');
+    expect(parseState(qs)).toEqual(shape);
+  });
+
+  it('infers polygon mode from a polygon alone, and drops one the API would reject', () => {
+    expect(parseState('polygon=-1,51;1,51;0.5,52')).toMatchObject({ areaMode: 'polygon' });
+    // Self-intersecting (bow-tie): not restored, so a hand-edited link can't cause 400s.
+    expect(parseState('polygon=0,0;10,10;10,0;0,10')).toMatchObject({
+      areaMode: 'radius',
+      polygon: null,
+    });
   });
 
   it('keeps rectangle mode with no box drawn yet', () => {
@@ -181,6 +206,15 @@ describe('params', () => {
       lng: -73.78,
       radiusMi: 123,
     });
+  });
+
+  it('sends a polygon as polygon and nothing else', () => {
+    const polygon: [number, number][] = [
+      [-1, 51],
+      [1, 51],
+      [0.5, 52],
+    ];
+    expect(toFilterParams({ ...initialState, areaMode: 'polygon', polygon })).toEqual({ polygon });
   });
 
   it('sends the rectangle as bbox and no radius', () => {

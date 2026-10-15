@@ -1,3 +1,5 @@
+import type { LngLat } from './polygon.js';
+
 /**
  * HTTP contract for /api/v1. The API serializes exactly these shapes and the web app consumes
  * them, so a breaking change here fails typecheck on both sides.
@@ -34,8 +36,9 @@ export interface PageMeta {
   limit: number;
   pageCount: number;
   /**
-   * The point `distanceMi` is measured from, when the search has one: the radius center, or the
-   * center (lng/lat midpoint) of `bbox`. Absent when there is no area filter.
+   * The point `distanceMi` is measured from, when the search has one: the radius center, the
+   * lng/lat midpoint of `bbox`, or the centroid of `polygon` (computed in Web Mercator, as drawn;
+   * it can lie outside a concave polygon). Absent when there is no area filter.
    */
   center?: GeoPoint;
 }
@@ -69,17 +72,23 @@ export interface AirportFilters {
   maxAltitudeFt?: number;
   /**
    * Center for a radius search; lat, lng and radiusMi must be given together. A search uses at most
-   * one area: a radius or a bbox, not both.
+   * one area: a radius, a bbox or a polygon.
    */
   lat?: number;
   lng?: number;
   radiusMi?: number;
   /** Rectangle in lng/lat (straight edges on the map); must not cross the antimeridian. */
   bbox?: [minLng: number, minLat: number, maxLng: number, maxLat: number];
+  /**
+   * Polygon as an open ring of `[lng, lat]` points, sent as `lng,lat;lng,lat;…`. Edges are straight
+   * on the (Web Mercator) map. 3–MAX_POLYGON_POINTS points; must not self-intersect or cross the
+   * antimeridian (see polygonProblems, which the API also enforces).
+   */
+  polygon?: LngLat[];
 }
 
 export interface AirportSearchParams extends AirportFilters {
-  /** Defaults: relevance when q is set, else distance when there is a radius or bbox, else name. */
+  /** Defaults: relevance when q is set, else distance when there is an area, else name. */
   sort?: SortField;
   order?: SortOrder;
   page?: number;
@@ -95,12 +104,6 @@ export interface DistanceResponse {
   from: string;
   to: string;
   distanceMi: number;
-}
-
-/** GeoJSON Polygon body for POST /airports/within. */
-export interface WithinRequest {
-  type: 'Polygon';
-  coordinates: [number, number][][];
 }
 
 export interface HealthResponse {
@@ -132,12 +135,6 @@ export const MAX_REQUEST_URL_LENGTH = 8000;
 export const DEFAULT_NEAREST_K = 5;
 /** Longest accepted `q` after trimming. */
 export const MAX_QUERY_LENGTH = 100;
-
-/** Response of POST /airports/within: every airport inside the polygon, sorted by name. */
-export interface WithinResponse {
-  data: AirportDto[];
-  total: number;
-}
 
 /** Response of GET /airports/:icao/nearest: the origin plus its k nearest airports, closest first. */
 export interface NearestResponse {

@@ -1,5 +1,5 @@
 import type { CountryCount } from '@location-search/shared';
-import { milesToMeters } from '@location-search/shared';
+import { type LngLat, MERCATOR_MAX_LAT, milesToMeters, polygonBBox } from '@location-search/shared';
 import { Inject, Injectable } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import type { DataSource } from 'typeorm';
@@ -34,6 +34,10 @@ export interface PointRow {
 
 const AIRPORT_COLUMNS = `a.icao_code, a.iata_code, a.name, a.city, a.country, a.altitude_ft,
   ST_Y(a.geog::geometry) AS lat, ST_X(a.geog::geometry) AS lng`;
+
+/** WKT for a validated open ring (numbers only, closed here). Bound as a single parameter. */
+const polygonWkt = (ring: readonly LngLat[]) =>
+  `POLYGON((${[...ring, ring[0]!].map(([lng, lat]) => `${lng} ${lat}`).join(', ')}))`;
 
 const geographyPoint = (params: SqlParams, lng: number, lat: number) =>
   `ST_SetSRID(ST_MakePoint(${params.add(lng)}::float8, ${params.add(lat)}::float8), 4326)::geography`;
@@ -148,26 +152,6 @@ export class AirportsRepository {
     return { hasFrom: !!row?.has_from, hasTo: !!row?.has_to, meters: row?.meters ?? null };
   }
 
-  /** PostGIS's verdict on a polygon's topology: null when valid, else the reason. */
-  async polygonInvalidReason(geojson: string): Promise<string | null> {
-    const [row] = await this.ds.query<{ valid: boolean; reason: string }[]>(
-      `SELECT ST_IsValid(g) AS valid, ST_IsValidReason(g) AS reason
-         FROM (SELECT ST_GeomFromGeoJSON($1) AS g) p`,
-      [geojson],
-    );
-    return row?.valid ? null : (row?.reason ?? 'invalid polygon');
-  }
-
-  /** Airports covered by a GeoJSON polygon (geodesic edges), sorted by name. Uses the GIST index. */
-  async within(geojson: string): Promise<AirportRow[]> {
-    return this.ds.query<AirportRow[]>(
-      `SELECT ${AIRPORT_COLUMNS} FROM airports a
-        WHERE ST_Covers(ST_SetSRID(ST_GeomFromGeoJSON($1), 4326)::geography, a.geog)
-        ORDER BY a.name, a.icao_code`,
-      [geojson],
-    );
-  }
-
   async countries(): Promise<CountryCount[]> {
     return this.ds.query<CountryCount[]>(
       `SELECT country, count(*)::int AS count FROM airports GROUP BY country ORDER BY country`,
@@ -209,6 +193,29 @@ export class AirportsRepository {
         `ST_DWithin(a.geog, ${circleCenter}, ${params.add(circle.radiusM)}::float8)`,
         `ST_X(a.geog::geometry) BETWEEN ${params.add(minLng)}::float8 AND ${params.add(maxLng)}::float8`,
         `ST_Y(a.geog::geometry) BETWEEN ${params.add(minLat)}::float8 AND ${params.add(maxLat)}::float8`,
+      );
+    }
+
+    if (c.polygon) {
+      // 1. Index prefilter: a circle covering the polygon's bounding box (GIST on geog).
+      // 2. Cheap lng/lat bounding-box check.
+      // 3. Exact test in Web Mercator (EPSG:3857), where the polygon's edges are drawn straight.
+      //    3857 can't represent the poles, so only airports within its latitude range are
+      //    transformed; CASE guarantees that order (AND does not).
+      const bbox = polygonBBox(c.polygon);
+      const [minLng, minLat, maxLng, maxLat] = bbox;
+      const circle = bboxCoveringCircle(bbox);
+      const circleCenter = geographyPoint(params, circle.center[0], circle.center[1]);
+      const wkt = params.add(polygonWkt(c.polygon));
+      conditions.push(
+        `ST_DWithin(a.geog, ${circleCenter}, ${params.add(circle.radiusM)}::float8)`,
+        `ST_X(a.geog::geometry) BETWEEN ${params.add(minLng)}::float8 AND ${params.add(maxLng)}::float8`,
+        `ST_Y(a.geog::geometry) BETWEEN ${params.add(minLat)}::float8 AND ${params.add(maxLat)}::float8`,
+        `CASE WHEN abs(ST_Y(a.geog::geometry)) < ${MERCATOR_MAX_LAT}
+           THEN ST_Covers(
+             ST_Transform(ST_GeomFromText(${wkt}::text, 4326), 3857),
+             ST_Transform(a.geog::geometry, 3857))
+           ELSE false END`,
       );
     }
 

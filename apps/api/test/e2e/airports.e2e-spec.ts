@@ -3,6 +3,7 @@ import {
   DEFAULT_PAGE_LIMIT,
   type ErrorResponse,
   MAX_COUNTRIES,
+  MAX_POLYGON_POINTS,
   MAX_REQUEST_URL_LENGTH,
   GEOJSON_MEDIA_TYPE,
   type Paginated,
@@ -160,7 +161,7 @@ describe('airports API (e2e)', () => {
       [{ unknown: 'x' }, /property unknown should not exist/],
       [
         { lat: '51.5', lng: '-0.12', radiusMi: '10', bbox: '-1,51,1,52' },
-        /use either lat, lng and radiusMi or bbox, not both/,
+        /use only one area: lat, lng and radiusMi, or bbox, or polygon/,
       ],
       [
         { country: Array.from({ length: MAX_COUNTRIES + 1 }, (_, i) => `Country ${i}`) },
@@ -327,62 +328,68 @@ describe('airports API (e2e)', () => {
     });
   });
 
-  describe('POST /airports/within', () => {
-    const london = [
-      [-1, 51],
-      [1, 51],
-      [1, 52],
-      [-1, 52],
-      [-1, 51],
-    ];
+  describe('polygon', () => {
+    // A concave L around London (lng,lat;…); expectations derived from the seeded data.
+    const londonL = '-1,51;1,51;1,51.4;-0.2,51.4;-0.2,52;-1,52';
 
-    it('returns airports inside the polygon', async () => {
+    it('filters to the polygon, sorts by distance from its centroid and reports it', async () => {
       const res = await request(http)
-        .post(`${api}/airports/within`)
-        .send({ type: 'Polygon', coordinates: [london] })
+        .get(`${api}/airports`)
+        .query({ polygon: londonL })
         .expect(200);
-      expect(res.body.total).toBe(15);
-      expect(res.body.data).toHaveLength(15);
-      expect(res.body.data.map((a: AirportDto) => a.icaoCode)).toContain('EGLL');
+      const body = res.body as Paginated<AirportDto>;
+      expect(body.meta.total).toBeGreaterThan(0);
+      expect(body.meta.center).toEqual({ lat: expect.any(Number), lng: expect.any(Number) });
+      const distances = body.data.map((a) => a.distanceMi!);
+      expect(distances).toEqual([...distances].sort((a, b) => a - b));
+
+      const points = (
+        await request(http).get(`${api}/airports/points`).query({ polygon: londonL }).expect(200)
+      ).body as PointsResponse;
+      expect(points.total).toBe(body.meta.total);
     });
 
     it.each([
-      [{ type: 'Point', coordinates: [london] }, /type must be 'Polygon'/],
-      [{ type: 'Polygon', coordinates: [london.slice(0, 3)] }, /at least 4 positions/],
-      [{ type: 'Polygon', coordinates: [[...london.slice(0, 4), [0, 0]]] }, /must be closed/],
       [
-        { type: 'Polygon', coordinates: [london.map(([x, y]) => [x! * 200, y])] },
-        /lng in \[-180, 180\]/,
+        'a self-intersecting polygon (bow-tie)',
+        '0,0;10,10;10,0;0,10',
+        /edges must not cross or touch/,
       ],
       [
-        {
-          type: 'Polygon',
-          coordinates: [
-            [
-              [0, 0],
-              [1, 1],
-              [1, 0],
-              [0, 1],
-              [0, 0],
-            ],
-          ],
-        },
-        /polygon is not valid: Self-intersection/,
+        'a polygon across the antimeridian',
+        '170,0;-170,0;-170,10;170,10',
+        /must not cross the antimeridian/,
       ],
-    ])('400s for an invalid polygon %#', async (body, pattern) => {
-      const res = await request(http).post(`${api}/airports/within`).send(body).expect(400);
-      expectError(res.body, 400);
-      expect([res.body.message].flat().join('\n')).toMatch(pattern);
+      [
+        `more than ${MAX_POLYGON_POINTS} points`,
+        Array.from({ length: MAX_POLYGON_POINTS + 1 }, (_, i) => {
+          const t = (2 * Math.PI * i) / (MAX_POLYGON_POINTS + 1);
+          return `${(10 * Math.cos(t)).toFixed(5)},${(10 * Math.sin(t)).toFixed(5)}`;
+        }).join(';'),
+        /at most 100 points/,
+      ],
+      ['fewer than 3 points', '0,0;1,1', /at least 3 distinct points/],
+    ])('rejects %s with a 400, whatever the client checked', async (_label, polygon, pattern) => {
+      for (const path of ['/airports', '/airports/points']) {
+        const res = await request(http).get(`${api}${path}`).query({ polygon }).expect(400);
+        expectError(res.body, 400);
+        expect([res.body.message].flat().join('\n')).toMatch(pattern);
+      }
     });
 
-    it('400s with the error shape for malformed JSON', async () => {
+    it('rejects a polygon combined with another area', async () => {
       const res = await request(http)
-        .post(`${api}/airports/within`)
-        .set('Content-Type', 'application/json')
-        .send('{"type":')
+        .get(`${api}/airports`)
+        .query({ polygon: londonL, bbox: '-1,51,1,52' })
         .expect(400);
-      expectError(res.body, 400);
+      expect(res.body.message).toEqual([
+        'use only one area: lat, lng and radiusMi, or bbox, or polygon',
+      ]);
     });
+  });
+
+  it('no longer serves POST /airports/within (replaced by the polygon filter)', async () => {
+    await request(http).post(`${api}/airports/within`).send({}).expect(404);
   });
 
   describe('GET /countries', () => {

@@ -2,8 +2,8 @@
 
 A read-only airport search app. A NestJS + PostGIS API serves 4,187 airports from the GADB dataset;
 a React + Leaflet UI lets you search by text, filter, and narrow results by clicking the map to
-search within a radius, or by clicking two corners to search a rectangle. Everything combines:
-text, filters and the map area apply together.
+search within a radius, by clicking two corners to search a rectangle, or by clicking points to
+outline any polygon. Everything combines: text, filters and the map area apply together.
 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): containers, request pipeline, and browser-to-database
   call diagrams
@@ -88,24 +88,28 @@ its own database and files run shuffled in parallel.
 Base path `/api/v1`. Interactive docs: `/api/docs`. Distances and radii are in **miles**, altitudes
 in **feet**. Response and parameter types live in `packages/shared/src/airports.ts`.
 
-| Method | Path                      | Description                                                                                                                                                                                        |
-| ------ | ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| GET    | `/airports`               | Paginated search. Params: `q`, `country` (repeatable), `iata`, `hasIata`, `minAltitudeFt`, `maxAltitudeFt`, `lat`+`lng`+`radiusMi`, `bbox`, `sort`, `order`, `page`, `limit` (default 25, max 100) |
-| GET    | `/airports/points`        | Every match as minimal `{icaoCode, lat, lng}` for map pins; same filters as `/airports`                                                                                                            |
-| GET    | `/airports/:icao`         | One airport by ICAO code                                                                                                                                                                           |
-| GET    | `/airports/:icao/nearest` | Nearest airports to the given one (up to 50)                                                                                                                                                       |
-| GET    | `/airports/distance`      | Great-circle distance in miles between two airports                                                                                                                                                |
-| POST   | `/airports/within`        | Airports inside a GeoJSON Polygon body                                                                                                                                                             |
-| GET    | `/countries`              | Countries with airport counts                                                                                                                                                                      |
-| GET    | `/health`                 | Liveness and database/PostGIS status                                                                                                                                                               |
+| Method | Path                      | Description                                                                                                                                                                                                   |
+| ------ | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GET    | `/airports`               | Paginated search. Params: `q`, `country` (repeatable), `iata`, `hasIata`, `minAltitudeFt`, `maxAltitudeFt`, `lat`+`lng`+`radiusMi`, `bbox`, `polygon`, `sort`, `order`, `page`, `limit` (default 25, max 100) |
+| GET    | `/airports/points`        | Every match as minimal `{icaoCode, lat, lng}` for map pins; same filters as `/airports`                                                                                                                       |
+| GET    | `/airports/:icao`         | One airport by ICAO code                                                                                                                                                                                      |
+| GET    | `/airports/:icao/nearest` | Nearest airports to the given one (up to 50)                                                                                                                                                                  |
+| GET    | `/airports/distance`      | Great-circle distance in miles between two airports                                                                                                                                                           |
+| GET    | `/countries`              | Countries with airport counts                                                                                                                                                                                 |
+| GET    | `/health`                 | Liveness and database/PostGIS status                                                                                                                                                                          |
 
-**Map areas.** A search takes at most one area: a radius (`lat`+`lng`+`radiusMi`) or a rectangle
-(`bbox=minLng,minLat,maxLng,maxLat`, straight edges on the map, no antimeridian crossing). Sending
-both is a 400. With either, rows carry `distanceMi` from the area's center, distance is the default
-sort, and `meta.center` reports that center (the bbox center is its lng/lat midpoint).
+**Map areas.** A search takes at most one area: a radius (`lat`+`lng`+`radiusMi`), a rectangle
+(`bbox=minLng,minLat,maxLng,maxLat`) or a polygon (`polygon=lng,lat;lng,lat;…`). Sending more than
+one is a 400. Rectangles and polygons have straight edges as drawn on the (Web Mercator) map and
+must not cross the antimeridian; polygons must also not self-intersect. The API enforces every rule
+itself, whatever the client checked. With any area, rows carry `distanceMi` from its center,
+distance is the default sort, and `meta.center` reports that center: the radius center, the bbox's
+lng/lat midpoint, or the polygon's centroid (which can lie outside a concave polygon).
+(`POST /airports/within` was removed; the `polygon` filter replaces it.)
 
 **Limits.** These keep every request far below common proxy URL limits (e.g. nginx's 8 KB);
-a unit test builds the worst-case URL from the real data and checks it stays under half the cap.
+a unit test builds the worst-case URL from the real data (4,793 characters today, with a 100-point
+polygon) and fails if it reaches 75% of the cap.
 
 | Limit                    | Value             | Over the limit                     |
 | ------------------------ | ----------------- | ---------------------------------- |
@@ -113,6 +117,7 @@ a unit test builds the worst-case URL from the real data and checks it stays und
 | `country` values         | 50                | 400 (the UI stops selection at 50) |
 | `limit` (page size)      | 100               | 400                                |
 | `radiusMi`               | 1–3,000           | 400                                |
+| `polygon` points         | 3–100             | 400 (the UI stops at 100)          |
 | Request URL (path+query) | 8,000 characters  | 414 (the UI refuses to send it)    |
 | Rate                     | 100 requests/s/IP | 429                                |
 

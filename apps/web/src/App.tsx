@@ -1,5 +1,10 @@
 import { useCallback, useMemo, useState } from 'react';
-import type { SortField } from '@location-search/shared';
+import {
+  formatPolygonParam,
+  type LngLat,
+  polygonBBox,
+  type SortField,
+} from '@location-search/shared';
 import { useAirportPoints, useAirports, useCountries } from './api/hooks';
 import { describeError } from './api/errors';
 import { AirportMap, type FitTarget } from './components/AirportMap';
@@ -17,6 +22,7 @@ import {
   type BBox,
   type LatLng,
 } from './lib/geo';
+import { addVertex, finishDraft } from './lib/polygonDraft';
 import {
   type AreaMode,
   effectiveOrder,
@@ -46,8 +52,13 @@ export function App() {
 
   // Bumped when the circle should be re-framed without the center changing (preset radius picks).
   const [fitNonce, setFitNonce] = useState(0);
-  // A rectangle restored from the URL is framed once on load; one the user just drew is not.
+  // An area restored from the URL is framed once on load; one the user just drew is not.
   const [restoredBbox] = useState(() => state.bbox);
+  const [restoredPolygon] = useState(() =>
+    state.polygon ? formatPolygonParam(state.polygon) : null,
+  );
+  // Polygon mode: the outline being drawn (not part of the URL until it is finished).
+  const [polygonDraft, setPolygonDraft] = useState<LngLat[]>([]);
   const [drawError, setDrawError] = useState<string | null>(null);
   // Clearing an area (or switching modes) must not move the map. Remember the other filters at that
   // moment and skip framing pins until they change: a new search still frames its results.
@@ -55,7 +66,15 @@ export function App() {
   const settledFilters = nonAreaFilterKey(queryState);
   const center = state.center;
   const bbox = state.bbox;
+  const polygon = state.polygon;
   const fit = useMemo<FitTarget>(() => {
+    if (polygon) {
+      const key = formatPolygonParam(polygon);
+      return {
+        key: `poly:${key}`,
+        bounds: key === restoredPolygon ? bboxBounds(polygonBBox(polygon)) : null,
+      };
+    }
     if (bbox) {
       return {
         key: `rect:${bbox.join(',')}`,
@@ -75,6 +94,8 @@ export function App() {
     // The circle bounds use the radius at the moment the key changes; radius alone must not refit.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
+    polygon,
+    restoredPolygon,
     bbox,
     restoredBbox,
     center,
@@ -89,7 +110,8 @@ export function App() {
   const clearArea = (patch: Partial<Pick<QueryState, 'areaMode'>> = {}) => {
     setDrawError(null);
     setNoPinFitFor(settledFilters);
-    update({ ...patch, center: null, bbox: null });
+    setPolygonDraft([]);
+    update({ ...patch, center: null, bbox: null, polygon: null });
   };
 
   const onCenterChange = useCallback(
@@ -102,6 +124,30 @@ export function App() {
   const onBboxChange = useCallback((b: BBox) => update({ bbox: b }), [update]);
   // Switching modes clears the current area: only one area applies at a time.
   const onModeChange = (areaMode: AreaMode) => clearArea({ areaMode });
+
+  const onPolygonPoint = useCallback(
+    (point: LatLng) => {
+      const result = addVertex(polygonDraft, point);
+      setDrawError(result.ok ? null : result.error);
+      if (result.ok) setPolygonDraft(result.draft);
+    },
+    [polygonDraft],
+  );
+  const onPolygonFinish = useCallback(() => {
+    if (polygonDraft.length === 0) return;
+    const result = finishDraft(polygonDraft);
+    if (!result.ok) {
+      setDrawError(result.error);
+      return;
+    }
+    setDrawError(null);
+    setPolygonDraft([]);
+    update({ polygon: result.polygon });
+  }, [polygonDraft, update]);
+  const onPolygonCancel = useCallback(() => {
+    setDrawError(null);
+    setPolygonDraft([]);
+  }, []);
 
   const onSort = (field: SortField) => {
     const current = effectiveSort(state);
@@ -145,6 +191,13 @@ export function App() {
             }}
             hasArea={hasArea(state)}
             onClear={() => clearArea()}
+            draftPoints={polygonDraft.length}
+            onFinishPolygon={onPolygonFinish}
+            onUndoPoint={() => {
+              setDrawError(null);
+              setPolygonDraft((d) => d.slice(0, -1));
+            }}
+            onCancelPolygon={onPolygonCancel}
           />
           <div className="h-[55vh] lg:h-[calc(100vh-13rem)]">
             <AirportMap
@@ -152,12 +205,17 @@ export function App() {
               center={center}
               radiusMi={state.radiusMi}
               bbox={bbox}
+              polygon={polygon}
+              polygonDraft={polygonDraft}
               referenceCenter={airports.data?.meta.center}
               pins={pins}
               fit={fit}
               onCenterChange={onCenterChange}
               onRadiusDrag={onRadiusDrag}
               onBboxChange={onBboxChange}
+              onPolygonPoint={onPolygonPoint}
+              onPolygonFinish={onPolygonFinish}
+              onPolygonCancel={onPolygonCancel}
               onDrawError={setDrawError}
             >
               {!filterActive && <MapPrompt mode={state.areaMode} />}

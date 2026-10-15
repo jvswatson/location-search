@@ -1,6 +1,9 @@
 import {
   DEFAULT_PAGE_LIMIT,
+  formatPolygonParam,
+  type LngLat,
   MAX_COUNTRIES,
+  parsePolygonParam,
   SORT_FIELDS,
   type AirportSearchParams,
   type SortField,
@@ -11,7 +14,7 @@ import { type BBox, clampRadius, type LatLng, parseBBox } from '../lib/geo';
 export const DEFAULT_RADIUS_MI = 50;
 
 /** How a click on the map defines the search area. One area at a time. */
-export const AREA_MODES = ['radius', 'rectangle'] as const;
+export const AREA_MODES = ['radius', 'rectangle', 'polygon'] as const;
 export type AreaMode = (typeof AREA_MODES)[number];
 
 export interface QueryState {
@@ -24,8 +27,10 @@ export interface QueryState {
   /** Radius mode: the clicked center. Always null in rectangle mode. */
   center: LatLng | null;
   radiusMi: number;
-  /** Rectangle mode: the drawn box. Always null in radius mode. */
+  /** Rectangle mode: the drawn box. Null in the other modes. */
   bbox: BBox | null;
+  /** Polygon mode: the finished outline (an open ring of [lng, lat]). Null in the other modes. */
+  polygon: LngLat[] | null;
   sort?: SortField;
   order?: SortOrder;
   page: number;
@@ -39,11 +44,13 @@ export const initialState: QueryState = {
   center: null,
   radiusMi: DEFAULT_RADIUS_MI,
   bbox: null,
+  polygon: null,
   page: 1,
 };
 
-/** True when the search has an area (a radius center or a rectangle) to measure distance from. */
-export const hasArea = (s: QueryState): boolean => s.center !== null || s.bbox !== null;
+/** True when the search has an area (radius center, rectangle or polygon) to measure from. */
+export const hasArea = (s: QueryState): boolean =>
+  s.center !== null || s.bbox !== null || s.polygon !== null;
 
 /** Identity of the filters other than the map area (text, countries, altitude, IATA). */
 export const nonAreaFilterKey = (s: QueryState): string =>
@@ -101,6 +108,7 @@ export function serializeState(s: QueryState): string {
   if (s.hasIata) p.set('hasIata', 'true');
   if (s.areaMode !== 'radius') p.set('area', s.areaMode);
   if (s.bbox) p.set('bbox', s.bbox.join(','));
+  if (s.polygon) p.set('polygon', formatPolygonParam(s.polygon));
   if (s.center) {
     p.set('lat', String(s.center.lat));
     p.set('lng', String(s.center.lng));
@@ -115,13 +123,19 @@ export function serializeState(s: QueryState): string {
 export function parseState(search: string): QueryState {
   const p = new URLSearchParams(search);
   const bbox = parseBBox(p.get('bbox'));
-  // An explicit area= wins; otherwise a valid bbox implies rectangle mode.
+  // Same validation as the API, so a hand-edited link can't restore a polygon it would reject.
+  const polygonRaw = p.get('polygon');
+  const parsedPolygon = polygonRaw ? parsePolygonParam(polygonRaw) : null;
+  const polygon = parsedPolygon?.ok ? parsedPolygon.points : null;
+  // An explicit area= wins; otherwise a valid polygon or bbox implies its mode.
   const areaParam = p.get('area');
   const areaMode: AreaMode = (AREA_MODES as readonly string[]).includes(areaParam ?? '')
     ? (areaParam as AreaMode)
-    : bbox
-      ? 'rectangle'
-      : 'radius';
+    : polygon
+      ? 'polygon'
+      : bbox
+        ? 'rectangle'
+        : 'radius';
   const lat = num(p.get('lat'));
   const lng = num(p.get('lng'));
   const hasCenter =
@@ -143,6 +157,7 @@ export function parseState(search: string): QueryState {
     center: hasCenter ? { lat, lng } : null,
     radiusMi: radius === undefined ? DEFAULT_RADIUS_MI : clampRadius(radius),
     bbox: areaMode === 'rectangle' ? bbox : null,
+    polygon: areaMode === 'polygon' ? polygon : null,
     page: page !== undefined && page >= 1 ? Math.floor(page) : 1,
   };
   const minAlt = num(p.get('minAltitudeFt'));
@@ -169,6 +184,7 @@ export function toFilterParams(s: QueryState): AirportSearchParams {
     params.radiusMi = s.radiusMi;
   }
   if (s.bbox) params.bbox = s.bbox;
+  if (s.polygon) params.polygon = s.polygon;
   return params;
 }
 

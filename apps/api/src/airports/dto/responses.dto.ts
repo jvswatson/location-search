@@ -10,7 +10,6 @@ import type {
   PageMeta,
   Paginated,
   PointsResponse,
-  WithinResponse,
 } from '@location-search/shared';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
@@ -59,11 +58,6 @@ export class PaginatedAirportsDoc implements Paginated<AirportDto> {
 
 export class PointsResponseDoc implements PointsResponse {
   @ApiProperty({ type: [AirportPointDoc] }) data: AirportPointDoc[];
-  @ApiProperty() total: number;
-}
-
-export class WithinResponseDoc implements WithinResponse {
-  @ApiProperty({ type: [AirportDoc] }) data: AirportDoc[];
   @ApiProperty() total: number;
 }
 

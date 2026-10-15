@@ -3,6 +3,7 @@ import {
   type AirportSearchParams,
   type CountryCount,
   type ErrorResponse,
+  formatPolygonParam,
   MAX_REQUEST_URL_LENGTH,
   type Paginated,
   type PointsResponse,
@@ -44,8 +45,12 @@ export function buildQueryString(params: QueryRecord): string {
 }
 
 function toRecord(params: AirportSearchParams): QueryRecord {
-  const { bbox, ...rest } = params;
-  return { ...rest, bbox: bbox?.join(',') };
+  const { bbox, polygon, ...rest } = params;
+  return {
+    ...rest,
+    bbox: bbox?.join(','),
+    polygon: polygon ? formatPolygonParam(polygon) : undefined,
+  };
 }
 
 export const airportsQuery = (params: AirportSearchParams): string =>

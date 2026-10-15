@@ -4,6 +4,7 @@ import type { AirportsRepository } from '../../src/airports/airports.repository.
 import { AirportsService } from '../../src/airports/airports.service.js';
 import {
   type FilterCriteria,
+  referencePoint,
   type SearchCriteria,
 } from '../../src/airports/search/search-criteria.js';
 import type { BBox } from '../../src/geo/coordinates.js';
@@ -19,14 +20,6 @@ const LONDON_BOX_ICAOS = [
   'EGGW', 'EGKB', 'EGKK', 'EGLC', 'EGLF', 'EGLK', 'EGLL', 'EGMC',
   'EGRR', 'EGSS', 'EGSX', 'EGTD', 'EGTH', 'EGVO', 'EGWU',
 ]; // prettier-ignore
-
-const square = (minLng: number, minLat: number, maxLng: number, maxLat: number) => [
-  [minLng, minLat],
-  [maxLng, minLat],
-  [maxLng, maxLat],
-  [minLng, maxLat],
-  [minLng, minLat],
-];
 
 describe('AirportsRepository (seeded PostGIS)', () => {
   let ds: DataSource;
@@ -141,50 +134,110 @@ describe('AirportsRepository (seeded PostGIS)', () => {
     });
   });
 
-  describe('polygon (within)', () => {
-    it('returns airports inside a polygon, sorted by name', async () => {
-      const rows = await repo.within(
-        JSON.stringify({ type: 'Polygon', coordinates: [square(...LONDON_BOX)] }),
+  describe('polygon', () => {
+    type Pt = [number, number];
+    const mercY = (lat: number) => Math.log(Math.tan(Math.PI / 4 + (lat * Math.PI) / 360));
+
+    /**
+     * Independent oracle: even-odd ray casting in Web Mercator over every airport, in TypeScript
+     * (no PostGIS). Airports beyond the Mercator range can't be inside a drawable polygon.
+     */
+    async function oracleInside(ring: Pt[]): Promise<string[]> {
+      const all = await ds.query<{ icao_code: string; lat: number; lng: number }[]>(
+        `SELECT icao_code, ST_Y(geog::geometry) AS lat, ST_X(geog::geometry) AS lng FROM airports`,
       );
-      const icaos = rows.map((r) => r.icao_code);
-      expect([...icaos].sort()).toEqual(LONDON_BOX_ICAOS);
-      // Compare with the database's own collation rather than JS string ordering.
-      const byName = (
+      const poly = ring.map(([lng, lat]) => [lng, mercY(lat)] as const);
+      const inside = (x: number, y: number) => {
+        let hit = false;
+        for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+          const [xi, yi] = poly[i]!;
+          const [xj, yj] = poly[j]!;
+          if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) hit = !hit;
+        }
+        return hit;
+      };
+      return all
+        .filter((a) => Math.abs(a.lat) < 85.0511 && inside(a.lng, mercY(a.lat)))
+        .map((a) => a.icao_code)
+        .sort();
+    }
+
+    const londonL: Pt[] = [
+      [-1, 51],
+      [1, 51],
+      [1, 51.4],
+      [-0.2, 51.4],
+      [-0.2, 52],
+      [-1, 52],
+    ];
+
+    it.each<[string, Pt[]]>([
+      ['concave L around London', londonL],
+      [
+        'diagonal triangle over France',
+        [
+          [-2, 43],
+          [7, 46],
+          [1, 50.5],
+        ],
+      ],
+      [
+        'large irregular polygon over Europe',
+        [
+          [-10, 36],
+          [20, 35],
+          [30, 45],
+          [25, 60],
+          [5, 62],
+          [-8, 55],
+        ],
+      ],
+      [
+        'far south (near the Mercator limit)',
+        [
+          [-180, -85.05],
+          [180, -85.05],
+          [180, -60],
+          [-180, -60],
+        ],
+      ],
+    ])('matches a Web Mercator ray-casting oracle: %s', async (_label, ring) => {
+      const expected = await oracleInside(ring);
+      expect(expected.length).toBeGreaterThan(0); // a non-empty answer, so the match means something
+      expect(await allPages({ polygon: ring })).toEqual(expected);
+    });
+
+    it('excludes the concave notch that a bounding box would include', async () => {
+      const inL = await allPages({ polygon: londonL });
+      const inBox = await allPages({ bbox: [-1, 51, 1, 52] });
+      expect(inL.length).toBeGreaterThan(0);
+      expect(inL.length).toBeLessThan(inBox.length);
+      expect(inBox).toEqual(expect.arrayContaining(inL));
+    });
+
+    it('never transforms polar airports (the South Pole station sits inside the lng/lat box)', async () => {
+      // Box spans to -90 on the lng/lat side; Mercator can't represent it. Must not error.
+      const ring: Pt[] = [
+        [-10, -85.05],
+        [10, -85.05],
+        [10, -80],
+        [-10, -80],
+      ];
+      await expect(repo.search(page({ polygon: ring }))).resolves.toMatchObject({ total: 0 });
+    });
+
+    it('measures distance from the Web Mercator centroid and sorts by it', async () => {
+      const centroid = referencePoint({ polygon: londonL })!;
+      const oracle = (
         await ds.query<{ icao_code: string }[]>(
-          `SELECT icao_code FROM airports WHERE icao_code = ANY($1) ORDER BY name, icao_code`,
-          [icaos],
+          `SELECT icao_code FROM airports WHERE icao_code = ANY($1)
+            ORDER BY ST_Distance(geog, ST_SetSRID(ST_MakePoint($2, $3), 4326)::geography), icao_code`,
+          [await oracleInside(londonL), centroid.lng, centroid.lat],
         )
       ).map((r) => r.icao_code);
-      expect(icaos).toEqual(byName);
-    });
-
-    it('excludes airports inside a hole', async () => {
-      const rows = await repo.within(
-        JSON.stringify({
-          type: 'Polygon',
-          coordinates: [square(...LONDON_BOX), square(-0.5, 51.3, 0.3, 51.7)],
-        }),
-      );
-      const icaos = rows.map((r) => r.icao_code);
-      expect(icaos).toHaveLength(11);
-      for (const inHole of ['EGKB', 'EGLC', 'EGLL', 'EGWU']) expect(icaos).not.toContain(inHole);
-    });
-
-    it('reports invalid topology instead of querying with it', async () => {
-      const bowtie = [
-        [0, 0],
-        [1, 1],
-        [1, 0],
-        [0, 1],
-        [0, 0],
-      ];
-      const geojson = JSON.stringify({ type: 'Polygon', coordinates: [bowtie] });
-      expect(await repo.polygonInvalidReason(geojson)).toMatch(/self-intersection/i);
-      expect(
-        await repo.polygonInvalidReason(
-          JSON.stringify({ type: 'Polygon', coordinates: [square(0, 0, 1, 1)] }),
-        ),
-      ).toBeNull();
+      const { rows } = await repo.search(page({ polygon: londonL, sort: 'distance' }));
+      expect(rows.map((r) => r.icao_code)).toEqual(oracle);
+      expect(rows.every((r) => typeof r.distance_m === 'number')).toBe(true);
     });
   });
 
@@ -324,6 +377,20 @@ describe('AirportsRepository (seeded PostGIS)', () => {
       ['text', { q: 'international' }],
       ['radius + altitude', { center: { ...CENTRAL_LONDON, radiusMi: 250 }, maxAltitudeFt: 500 }],
       ['bbox + hasIata', { bbox: [-10, 35, 5, 60], hasIata: true }],
+      [
+        'polygon + text',
+        {
+          polygon: [
+            [-10, 36],
+            [20, 35],
+            [30, 45],
+            [25, 60],
+            [5, 62],
+            [-8, 55],
+          ],
+          q: 'international',
+        },
+      ],
     ])('returns the same set as the paginated list (%s)', async (_label, criteria) => {
       const points = await repo.points(criteria);
       const { total } = await repo.search(page({ ...criteria, limit: 1 }));

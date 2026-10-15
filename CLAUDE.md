@@ -45,14 +45,20 @@ pnpm test:e2e
   distances/radii in **miles** in the API and UI. PostGIS still works in meters internally.
 - API is read-only, under `/api/v1`. Rate limit 100 req/s per IP (env-configurable), `/health`
   exempt.
-- Map areas: one at a time, chosen by a _Radius | Rectangle_ switch (switching clears the area).
-  Radius = `lat`/`lng`/`radiusMi`; rectangle = two clicks → `bbox` (no antimeridian crossing,
-  checked in UI and API). Distance (and the default distance sort) is from the area's center,
-  returned as `meta.center`; a rectangle's center is its lng/lat midpoint. A rectangle restored
-  from the URL is framed on load; one just drawn is not refit. Polygon mode is planned (PR 2).
+- Map areas: one at a time, chosen by a _Radius | Rectangle | Polygon_ switch (switching clears
+  the area). Radius = `lat`/`lng`/`radiusMi`; rectangle = two clicks → `bbox`; polygon = clicks,
+  closed by double-click / first point / Finish / Enter → `polygon=lng,lat;…` (3–100 points).
+  Polygon rules (no self-intersection, no antimeridian crossing) live in
+  `packages/shared/src/polygon.ts` and are enforced by **both** UI and API. Polygon containment
+  and centroid use Web Mercator (EPSG:3857), as drawn; airports beyond ±85.05° are never
+  transformed. Distance (and the default sort) is from `meta.center`: radius center, bbox
+  midpoint or polygon centroid. Areas restored from the URL are framed on load; just-drawn ones
+  are not. The map toolbar must not change height while drawing (it would move the map under
+  the cursor). `POST /airports/within` was removed.
 - Request limits (shared constants, enforced in API **and** UI): 50 `country` values, 100-char
-  `q`, 8,000-char request URL (414). `src/common/request-size.spec.ts` pins the worst-case URL
-  built from real data below half the cap; keep it passing when adding parameters.
+  `q`, 100 polygon points, 8,000-char request URL (414). `src/common/request-size.spec.ts` pins the worst-case URL
+  built from real data (4,793 chars with a 100-point polygon) below 75% of the cap; keep it
+  passing when adding parameters.
 - Search: text + filters + map area all combine. `SearchStrategy` seam in the service layer
   (v1 = text: exact code match > full-text rank > trigram). No vector search in v1.
 - UI: prompt to click the map or search; the table lists all airports until a filter is active.

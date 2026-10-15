@@ -2,6 +2,8 @@ import {
   DEFAULT_PAGE_LIMIT,
   MAX_COUNTRIES,
   MAX_PAGE_LIMIT,
+  MAX_POLYGON_POINTS,
+  parsePolygonParam,
   MAX_QUERY_LENGTH,
   MAX_RADIUS_MI,
   MIN_RADIUS_MI,
@@ -59,6 +61,24 @@ class BBoxConstraint implements ValidatorConstraintInterface {
 
   defaultMessage(args: ValidationArguments): string {
     return bboxErrors(args.value).join('; ');
+  }
+}
+
+const polygonErrors = (value: unknown): string[] => {
+  if (typeof value !== 'string') return ['polygon must be a single string'];
+  const parsed = parsePolygonParam(value);
+  return parsed.ok ? [] : parsed.errors;
+};
+
+/** Validates `polygon` with the same shared rules the web client applies before sending. */
+@ValidatorConstraint({ name: 'polygon' })
+class PolygonConstraint implements ValidatorConstraintInterface {
+  validate(value: unknown): boolean {
+    return polygonErrors(value).length === 0;
+  }
+
+  defaultMessage(args: ValidationArguments): string {
+    return polygonErrors(args.value).join('; ');
   }
 }
 
@@ -157,6 +177,14 @@ export class AirportFiltersQueryDto {
   @IsOptional()
   @Validate(BBoxConstraint)
   bbox?: string;
+
+  @ApiPropertyOptional({
+    description: `Polygon as \`lng,lat;lng,lat;…\` (3–${MAX_POLYGON_POINTS} points; a repeated closing point is allowed). Edges are straight on the Web Mercator map; it must not self-intersect or cross the antimeridian. Not combinable with lat/lng/radiusMi or bbox. Distances are measured from its centroid, returned as meta.center.`,
+    example: '-1,51;1,51;0.5,52;-0.5,52',
+  })
+  @IsOptional()
+  @Validate(PolygonConstraint)
+  polygon?: string;
 
   @ApiPropertyOptional({
     description:

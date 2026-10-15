@@ -8,8 +8,6 @@ import {
   type NearestResponse,
   type Paginated,
   type PointsResponse,
-  type WithinRequest,
-  type WithinResponse,
 } from '@location-search/shared';
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { type AirportRow, AirportsRepository, type PointRow } from './airports.repository.js';
@@ -97,15 +95,6 @@ export class AirportsService {
       throw new NotFoundException(`Airport not found: ${[...new Set(missing)].join(', ')}`);
     }
     return { from, to, distanceMi: roundMiles(meters) };
-  }
-
-  async within(polygon: WithinRequest): Promise<WithinResponse> {
-    // Re-serialize only the validated members: never forward unknown keys to PostGIS.
-    const geojson = JSON.stringify({ type: 'Polygon', coordinates: polygon.coordinates });
-    const reason = await this.repo.polygonInvalidReason(geojson);
-    if (reason) throw new BadRequestException([`polygon is not valid: ${reason}`]);
-    const rows = await this.repo.within(geojson);
-    return { data: rows.map(toAirportDto), total: rows.length };
   }
 
   countries(): Promise<CountryCount[]> {

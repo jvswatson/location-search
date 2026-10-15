@@ -68,14 +68,44 @@ describe('resolveFilters', () => {
     expect(!result.ok && result.errors).toHaveLength(4);
   });
 
-  it('accepts one area at most: a radius or a bbox', () => {
-    expect(resolveFilters({ ...center, bbox: '-1,51,1,52' })).toEqual({
+  it('accepts one area at most: a radius, a bbox or a polygon', () => {
+    const one = 'use only one area: lat, lng and radiusMi, or bbox, or polygon';
+    expect(resolveFilters({ ...center, bbox: '-1,51,1,52' })).toEqual({ ok: false, errors: [one] });
+    expect(resolveFilters({ ...center, polygon: '0,0;1,0;1,1' })).toEqual({
       ok: false,
-      errors: ['use either lat, lng and radiusMi or bbox, not both'],
+      errors: [one],
+    });
+    expect(resolveFilters({ bbox: '-1,51,1,52', polygon: '0,0;1,0;1,1' })).toEqual({
+      ok: false,
+      errors: [one],
     });
     expect(resolveFilters({ lat: 51, bbox: '-1,51,1,52' })).toMatchObject({
       ok: false,
-      errors: expect.arrayContaining(['use either lat, lng and radiusMi or bbox, not both']),
+      errors: expect.arrayContaining([one]),
+    });
+  });
+
+  it('parses a polygon, dropping a repeated closing point', () => {
+    expect(resolveFilters({ polygon: '0,0;10,0;10,10;0,0' })).toEqual({
+      ok: true,
+      value: {
+        polygon: [
+          [0, 0],
+          [10, 0],
+          [10, 10],
+        ],
+      },
+    });
+  });
+
+  it('reports polygon problems with the shared messages', () => {
+    expect(resolveFilters({ polygon: '0,0;10,10;10,0;0,10' })).toEqual({
+      ok: false,
+      errors: ['polygon edges must not cross or touch each other'],
+    });
+    expect(resolveFilters({ polygon: '170,0;-170,0;-170,10' })).toEqual({
+      ok: false,
+      errors: ['polygon must not cross the antimeridian (±180° longitude)'],
     });
   });
 
@@ -88,6 +118,16 @@ describe('referencePoint', () => {
   it('is the radius center, the bbox lng/lat midpoint, or nothing', () => {
     expect(referencePoint({ center })).toEqual({ lat: 51.5, lng: -0.12 });
     expect(referencePoint({ bbox: [-2, 50, 1, 53] })).toEqual({ lat: 51.5, lng: -0.5 });
+    const square = referencePoint({
+      polygon: [
+        [-10, -10],
+        [10, -10],
+        [10, 10],
+        [-10, 10],
+      ],
+    });
+    expect(square?.lat).toBeCloseTo(0, 9);
+    expect(square?.lng).toBeCloseTo(0, 9);
     expect(referencePoint({})).toBeUndefined();
   });
 });
@@ -136,10 +176,11 @@ describe('resolveSearch', () => {
     });
     expect(resolveSearch({ sort: 'distance', q: 'x' })).toEqual({
       ok: false,
-      errors: ['sort=distance requires a radius (lat, lng and radiusMi) or a bbox'],
+      errors: ['sort=distance requires an area: a radius (lat, lng and radiusMi), bbox or polygon'],
     });
     expect(resolveSearch({ sort: 'distance', ...center })).toMatchObject({ ok: true });
     expect(resolveSearch({ sort: 'distance', bbox: '-1,51,1,52' })).toMatchObject({ ok: true });
+    expect(resolveSearch({ sort: 'distance', polygon: '0,0;1,0;1,1' })).toMatchObject({ ok: true });
   });
 
   it('defaults to distance from the bbox midpoint', () => {

@@ -208,6 +208,38 @@ sequenceDiagram
   B->>U: rectangle, crosshair at meta.center, pins, distance column
 ```
 
+### Polygon (clicks)
+
+Polygon mode draws the outline on the client and validates it with the same shared rules the API
+applies (`packages/shared/src/polygon.ts`): 3–100 points, no crossing or touching edges, no edge
+across the antimeridian. The API re-checks every rule, so a hand-made request gets the same 400.
+
+```mermaid
+sequenceDiagram
+  autonumber
+  actor U as User
+  participant B as Browser (React)
+  participant N as Nest
+  participant P as PostGIS
+
+  U->>B: choose Polygon (clears any other area)
+  loop each click
+    U->>B: click
+    B->>B: addVertex: round, keep the world copy continuous,<br/>refuse an antimeridian crossing or point 101
+  end
+  U->>B: double-click, click the first point, Enter or Finish
+  B->>B: finishDraft = polygonProblems (self-intersection etc.)<br/>problem → message, outline kept for Undo
+  par table page
+    B->>N: GET /api/v1/airports?polygon=-1,51#59;1,51#59;…&page=1&limit=25
+    N->>N: parsePolygonParam (same rules), one area only,<br/>centroid in Web Mercator → meta.center
+    N->>P: WHERE ST_DWithin(covering circle) AND lng/lat box<br/>AND CASE |lat| < 85.05 THEN ST_Covers(ST_Transform(poly, 3857), ST_Transform(point, 3857))<br/>ORDER BY ST_Distance(geog, centroid), icao_code
+    N-->>B: rows with distanceMi + meta.center
+  and every pin
+    B->>N: GET /api/v1/airports/points?polygon=…
+  end
+  B->>U: polygon, crosshair at the centroid, pins, distance column
+```
+
 ### Text search combined with filters
 
 ```mermaid
@@ -267,14 +299,14 @@ erDiagram
   }
 ```
 
-| Index                                      | Type               | Serves                                                                                   |
-| ------------------------------------------ | ------------------ | ---------------------------------------------------------------------------------------- |
-| `airports_icao_code_key`                   | unique btree       | `/airports/:icao`, exact code match, upserts                                             |
-| `airports_iata_code`                       | btree              | exact IATA match, `hasIata`                                                              |
-| `airports_geog_gist`                       | GIST               | `ST_DWithin` radius, bbox prefilter, KNN `<->` for `/nearest`, `ST_Covers` for `/within` |
-| `airports_search_vector_gin`               | GIN                | full-text prefix search                                                                  |
-| `airports_name_trgm`, `airports_city_trgm` | GIN `gin_trgm_ops` | typo-tolerant `<%` matching                                                              |
-| `airports_country`, `airports_altitude_ft` | btree              | country and altitude filters                                                             |
+| Index                                      | Type               | Serves                                                                     |
+| ------------------------------------------ | ------------------ | -------------------------------------------------------------------------- |
+| `airports_icao_code_key`                   | unique btree       | `/airports/:icao`, exact code match, upserts                               |
+| `airports_iata_code`                       | btree              | exact IATA match, `hasIata`                                                |
+| `airports_geog_gist`                       | GIST               | `ST_DWithin` radius, bbox and polygon prefilters, KNN `<->` for `/nearest` |
+| `airports_search_vector_gin`               | GIN                | full-text prefix search                                                    |
+| `airports_name_trgm`, `airports_city_trgm` | GIN `gin_trgm_ops` | typo-tolerant `<%` matching                                                |
+| `airports_country`, `airports_altitude_ft` | btree              | country and altitude filters                                               |
 
 Index use is asserted by `apps/api/test/integration/airports.query-plans.int-spec.ts`.
 

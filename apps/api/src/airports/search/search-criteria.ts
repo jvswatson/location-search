@@ -2,6 +2,9 @@ import {
   type AirportSearchParams,
   DEFAULT_PAGE_LIMIT,
   type GeoPoint,
+  type LngLat,
+  parsePolygonParam,
+  polygonCentroid,
   type SortField,
   type SortOrder,
 } from '@location-search/shared';
@@ -23,6 +26,8 @@ export interface FilterCriteria {
   maxAltitudeFt?: number;
   center?: Center;
   bbox?: BBox;
+  /** Open ring, validated (see polygonProblems). */
+  polygon?: LngLat[];
 }
 
 export interface SearchCriteria extends FilterCriteria {
@@ -32,12 +37,13 @@ export interface SearchCriteria extends FilterCriteria {
   limit: number;
 }
 
-/** Validated query input, before cross-field rules (bbox still a string). */
+/** Validated query input, before cross-field rules (bbox and polygon still strings). */
 export type FilterInput = Omit<
   AirportSearchParams,
-  'bbox' | 'sort' | 'order' | 'page' | 'limit'
+  'bbox' | 'polygon' | 'sort' | 'order' | 'page' | 'limit'
 > & {
   bbox?: string;
+  polygon?: string;
 };
 export type SearchInput = FilterInput &
   Pick<AirportSearchParams, 'sort' | 'order' | 'page' | 'limit'>;
@@ -75,22 +81,31 @@ export function resolveFilters(input: FilterInput): Resolved<FilterCriteria> {
     else errors.push(...parsed.errors);
   }
 
-  // One area per search: the UI offers either a radius or a rectangle, never both.
-  if (centerParts > 0 && input.bbox !== undefined) {
-    errors.push('use either lat, lng and radiusMi or bbox, not both');
+  if (input.polygon !== undefined) {
+    const parsed = parsePolygonParam(input.polygon);
+    if (parsed.ok) criteria.polygon = parsed.points;
+    else errors.push(...parsed.errors);
+  }
+
+  // One area per search: the UI offers a radius, a rectangle or a polygon, one at a time.
+  const areas = [centerParts > 0, input.bbox !== undefined, input.polygon !== undefined];
+  if (areas.filter(Boolean).length > 1) {
+    errors.push('use only one area: lat, lng and radiusMi, or bbox, or polygon');
   }
 
   return errors.length ? { ok: false, errors } : { ok: true, value: criteria };
 }
 
 /**
- * The point distances are measured from: the radius center, or the bbox's lng/lat midpoint (the
- * center of the rectangle as drawn on the map). Undefined when the search has no area.
+ * The point distances are measured from: the radius center, the bbox's lng/lat midpoint (the
+ * center of the rectangle as drawn on the map), or the polygon's centroid (in Web Mercator, as
+ * drawn). Undefined when the search has no area.
  */
 export function referencePoint(
-  criteria: Pick<FilterCriteria, 'center' | 'bbox'>,
+  criteria: Pick<FilterCriteria, 'center' | 'bbox' | 'polygon'>,
 ): GeoPoint | undefined {
   if (criteria.center) return { lat: criteria.center.lat, lng: criteria.center.lng };
+  if (criteria.polygon) return polygonCentroid(criteria.polygon);
   if (criteria.bbox) {
     const [minLng, minLat, maxLng, maxLat] = criteria.bbox;
     return { lat: (minLat + maxLat) / 2, lng: (minLng + maxLng) / 2 };
@@ -99,7 +114,9 @@ export function referencePoint(
 }
 
 /** Default sort: relevance with q, else distance when there is an area, else name. */
-export function defaultSort(criteria: Pick<FilterCriteria, 'q' | 'center' | 'bbox'>): SortField {
+export function defaultSort(
+  criteria: Pick<FilterCriteria, 'q' | 'center' | 'bbox' | 'polygon'>,
+): SortField {
   if (criteria.q) return 'relevance';
   if (referencePoint(criteria)) return 'distance';
   return 'name';
@@ -115,8 +132,15 @@ export function resolveSearch(input: SearchInput): Resolved<SearchCriteria> {
 
   if (input.sort === 'relevance' && !input.q) errors.push('sort=relevance requires q');
   // Partial centers are already reported by resolveFilters.
-  if (input.sort === 'distance' && !centerGiven(input) && input.bbox === undefined) {
-    errors.push('sort=distance requires a radius (lat, lng and radiusMi) or a bbox');
+  if (
+    input.sort === 'distance' &&
+    !centerGiven(input) &&
+    input.bbox === undefined &&
+    input.polygon === undefined
+  ) {
+    errors.push(
+      'sort=distance requires an area: a radius (lat, lng and radiusMi), bbox or polygon',
+    );
   }
   if (errors.length) return { ok: false, errors };
 

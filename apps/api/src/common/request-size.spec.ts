@@ -1,6 +1,7 @@
 import {
   MAX_COUNTRIES,
   MAX_PAGE_LIMIT,
+  MAX_POLYGON_POINTS,
   MAX_QUERY_LENGTH,
   MAX_REQUEST_URL_LENGTH,
 } from '@location-search/shared';
@@ -13,7 +14,7 @@ import { loadCleanAirports } from '../database/seed/seeder.js';
  * new parameter that eats the margin fails here instead of in production.
  */
 describe('worst-case request URL', () => {
-  it('stays well under MAX_REQUEST_URL_LENGTH', async () => {
+  it('stays under 75% of MAX_REQUEST_URL_LENGTH', async () => {
     const { airports } = await loadCleanAirports();
     const encodedLength = (name: string) =>
       new URLSearchParams([['country', name]]).toString().length;
@@ -29,7 +30,12 @@ describe('worst-case request URL', () => {
       ['hasIata', 'true'],
       ['minAltitudeFt', '-1263'],
       ['maxAltitudeFt', '14500'],
-      ['bbox', '-179.12345,-89.12345,179.12345,89.12345'],
+      // The largest area parameter (bbox/radius are shorter, and only one area is allowed): every
+      // point at the longest possible coordinates.
+      [
+        'polygon',
+        Array.from({ length: MAX_POLYGON_POINTS }, () => '-179.12345,-85.12345').join(';'),
+      ],
       ['sort', 'relevance'],
       ['order', 'desc'],
       ['page', '168'],
@@ -39,7 +45,8 @@ describe('worst-case request URL', () => {
     const url = `/api/v1/airports/points?${params.toString()}`;
 
     expect(longestCountries).toHaveLength(MAX_COUNTRIES);
-    // Measured at 2,338 characters when this test was written (before polygons); keep at least half the budget free.
-    expect(url.length).toBeLessThan(MAX_REQUEST_URL_LENGTH / 2);
+    // Measured at 4,793 characters with a 100-point polygon (2,338 before polygons). Fail well before
+    // the 8,000 cap: at 75% there are still 2,000 characters of headroom for whatever grew.
+    expect(url.length).toBeLessThan(MAX_REQUEST_URL_LENGTH * 0.75);
   });
 });
