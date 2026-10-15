@@ -73,7 +73,7 @@ sequenceDiagram
 
   R->>R: install, build shared
   R->>TC: api e2e: boot Nest per suite against fresh seeded DBs
-  TC-->>R: 41 HTTP tests
+  TC-->>R: HTTP tests pass
   R->>S: docker compose -f docker-compose.e2e.yml up --build --wait
   Note over S: db (tmpfs) + app on :3100<br/>waits until /api/v1/health is healthy
   R->>R: playwright install --with-deps chromium

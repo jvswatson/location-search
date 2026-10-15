@@ -43,9 +43,13 @@ pnpm --filter @location-search/api seed   # needs a build first: pnpm build:shar
 pnpm dev            # builds shared, then runs api and web in watch mode
 ```
 
-`.env.example` lists the variables the API reads (`DB_HOST`, `DB_PORT`, `POSTGRES_*`, `PORT`,
-`RATE_LIMIT_LIMIT`, `RATE_LIMIT_TTL_MS`). `DATABASE_URL` is accepted as an alternative to the
-individual DB variables.
+`.env.example` lists the variables you are most likely to change (`DB_HOST`, `DB_PORT`,
+`POSTGRES_*`, `PORT`, `RATE_LIMIT_LIMIT`, `RATE_LIMIT_TTL_MS`). `DATABASE_URL` is accepted as an
+alternative to the individual DB variables. The API also reads `LOG_LEVEL` (default `info`),
+`DB_LOGGING` (default `false`), `TRUST_PROXY` (Express `trust proxy`, default
+`loopback, linklocal, uniquelocal`), `WEB_DIST_PATH` (serve the built UI from this directory; the
+app image sets it) and `NODE_ENV` (below). The full schema, with defaults, is
+`apps/api/src/config/env.validation.ts`.
 
 One `.env` at the repo root configures everything: Docker Compose reads it for `${…}`
 substitution, and the api's `dev`, `seed` and `migration:run` scripts load it with
@@ -87,14 +91,16 @@ its own database and files run shuffled in parallel.
 
 Base path `/api/v1`. Interactive docs: `/api/docs`. Distances and radii are in **miles**, altitudes
 in **feet**. Response and parameter types live in `packages/shared/src/airports.ts`.
+`/airports` and `/airports/points` return GeoJSON `FeatureCollection`s instead of JSON with
+`format=geojson` or an `Accept: application/geo+json` header.
 
 | Method | Path                      | Description                                                                                                                                                                                                   |
 | ------ | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | GET    | `/airports`               | Paginated search. Params: `q`, `country` (repeatable), `iata`, `hasIata`, `minAltitudeFt`, `maxAltitudeFt`, `lat`+`lng`+`radiusMi`, `bbox`, `polygon`, `sort`, `order`, `page`, `limit` (default 25, max 100) |
 | GET    | `/airports/points`        | Every match as minimal `{icaoCode, lat, lng}` for map pins; same filters as `/airports`                                                                                                                       |
 | GET    | `/airports/:icao`         | One airport by ICAO code                                                                                                                                                                                      |
-| GET    | `/airports/:icao/nearest` | Nearest airports to the given one (up to 50)                                                                                                                                                                  |
-| GET    | `/airports/distance`      | Great-circle distance in miles between two airports                                                                                                                                                           |
+| GET    | `/airports/:icao/nearest` | Nearest airports to the given one: `k` (default 5, max 50)                                                                                                                                                    |
+| GET    | `/airports/distance`      | Distance in miles between two airports (`from`, `to`: ICAO codes), measured on the spheroid                                                                                                                   |
 | GET    | `/countries`              | Countries with airport counts                                                                                                                                                                                 |
 | GET    | `/health`                 | Liveness and database/PostGIS status                                                                                                                                                                          |
 
